@@ -284,14 +284,6 @@ public:
             glBindTexture(GL_TEXTURE_2D, backdrop_texture_);
             glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, src_x, height - src_bottom, src_w, src_h);
 
-            static constexpr int kBlurDirections = 16;
-            static constexpr int kBlurQuality = 3;
-            static constexpr float kTau = 6.28318530718f;
-            const int sample_count = 1 + kBlurDirections * kBlurQuality;
-            const float mix_alpha = std::clamp(cmd.effect_alpha, 0.0f, 1.0f);
-            const float center_weight = (1.0f - mix_alpha) + mix_alpha / static_cast<float>(sample_count);
-            const float blur_weight = mix_alpha / static_cast<float>(sample_count);
-            const float blur_size = std::max(0.5f, cmd.blur_radius);
             const float src_left = static_cast<float>(src_x);
             const float src_top = static_cast<float>(src_y);
             const float src_wf = static_cast<float>(src_w);
@@ -322,58 +314,55 @@ public:
                 center = project_vertex(cmd, cmd.rect.x + cmd.rect.w * 0.5f, cmd.rect.y + cmd.rect.h * 0.5f);
             }
 
-            auto emit_tex_vertex = [&](std::vector<ModernGlVertex>& out_vertices, const Point& screen_point, float dx,
-                                       float dy, const Color& color) {
-                const float sample_x = screen_point[0] + dx;
-                const float sample_y = screen_point[1] + dy;
+            auto emit_tex_vertex = [&](std::vector<ModernGlVertex>& out_vertices, const Point& screen_point,
+                                       const Color& color) {
+                const float sample_x = std::clamp(screen_point[0], bounds.x, bounds.x + bounds.w);
+                const float sample_y = std::clamp(screen_point[1], bounds.y, bounds.y + bounds.h);
                 const float u = std::clamp((sample_x - src_left) / src_wf, 0.0f, 1.0f);
                 const float v = std::clamp(1.0f - ((sample_y - src_top) / src_hf), 0.0f, 1.0f);
                 out_vertices.push_back(modern_gl_vertex(screen_point[0], screen_point[1], color, u, v));
             };
 
-            auto draw_blur_pass = [&](float dx, float dy, float weight) {
-                const float alpha = std::clamp(weight, 0.0f, 1.0f);
-                if (alpha <= 1e-4f) {
-                    return;
+            const Color pass_color = rgba(1.0f, 1.0f, 1.0f, 1.0f);
+            auto& pass_vertices = blur_pass_vertices_scratch_;
+            modern_gl_prepare_scratch(pass_vertices, static_cast<std::size_t>(std::max(6, polygon_count * 3)));
+            if (!rounded) {
+                emit_tex_vertex(pass_vertices, polygon[0], pass_color);
+                emit_tex_vertex(pass_vertices, polygon[1], pass_color);
+                emit_tex_vertex(pass_vertices, polygon[2], pass_color);
+                emit_tex_vertex(pass_vertices, polygon[0], pass_color);
+                emit_tex_vertex(pass_vertices, polygon[2], pass_color);
+                emit_tex_vertex(pass_vertices, polygon[3], pass_color);
+            } else {
+                for (int i = 0; i < polygon_count; ++i) {
+                    const int next = (i + 1) % polygon_count;
+                    emit_tex_vertex(pass_vertices, center, pass_color);
+                    emit_tex_vertex(pass_vertices, polygon[static_cast<std::size_t>(i)], pass_color);
+                    emit_tex_vertex(pass_vertices, polygon[static_cast<std::size_t>(next)], pass_color);
                 }
-                const Color pass_color = rgba(alpha, alpha, alpha, alpha);
-                auto& pass_vertices = blur_pass_vertices_scratch_;
-                modern_gl_prepare_scratch(pass_vertices, static_cast<std::size_t>(std::max(6, polygon_count * 3)));
-                if (!rounded) {
-                    emit_tex_vertex(pass_vertices, polygon[0], dx, dy, pass_color);
-                    emit_tex_vertex(pass_vertices, polygon[1], dx, dy, pass_color);
-                    emit_tex_vertex(pass_vertices, polygon[2], dx, dy, pass_color);
-                    emit_tex_vertex(pass_vertices, polygon[0], dx, dy, pass_color);
-                    emit_tex_vertex(pass_vertices, polygon[2], dx, dy, pass_color);
-                    emit_tex_vertex(pass_vertices, polygon[3], dx, dy, pass_color);
-                } else {
-                    for (int i = 0; i < polygon_count; ++i) {
-                        const int next = (i + 1) % polygon_count;
-                        emit_tex_vertex(pass_vertices, center, dx, dy, pass_color);
-                        emit_tex_vertex(pass_vertices, polygon[static_cast<std::size_t>(i)], dx, dy, pass_color);
-                        emit_tex_vertex(pass_vertices, polygon[static_cast<std::size_t>(next)], dx, dy, pass_color);
-                    }
-                }
-                modern_gl_draw_vertices(GL_TRIANGLES, pass_vertices.data(), pass_vertices.size(), width, height,
-                                        backdrop_texture_, ModernGlTextureMode::Rgba);
-            };
+            }
+
+            const float u0 = std::clamp((bounds.x - src_left) / src_wf, 0.0f, 1.0f);
+            const float u1 = std::clamp((bounds.x + bounds.w - src_left) / src_wf, 0.0f, 1.0f);
+            const float v0 = std::clamp(1.0f - ((bounds.y + bounds.h - src_top) / src_hf), 0.0f, 1.0f);
+            const float v1 = std::clamp(1.0f - ((bounds.y - src_top) / src_hf), 0.0f, 1.0f);
+            const float uv_pad_x = 0.5f / std::max(1.0f, src_wf);
+            const float uv_pad_y = 0.5f / std::max(1.0f, src_hf);
+            const float uv_min_x = std::clamp(std::min(u0, u1) + uv_pad_x, 0.0f, 1.0f);
+            const float uv_max_x = std::clamp(std::max(u0, u1) - uv_pad_x, 0.0f, 1.0f);
+            const float uv_min_y = std::clamp(std::min(v0, v1) + uv_pad_y, 0.0f, 1.0f);
+            const float uv_max_y = std::clamp(std::max(v0, v1) - uv_pad_y, 0.0f, 1.0f);
+            const float blur_amount = std::clamp(cmd.blur_radius / std::max(1.0f, std::max(src_wf, src_hf)),
+                                                 0.0015f, 0.08f);
+            const float mix_amount = std::clamp(cmd.effect_alpha, 0.0f, 1.0f);
 
             glDisable(GL_CULL_FACE);
             glDisable(GL_DEPTH_TEST);
-            glDisable(GL_BLEND);
-            draw_blur_pass(0.0f, 0.0f, center_weight);
             glEnable(GL_BLEND);
-            glBlendFunc(GL_ONE, GL_ONE);
-            for (int direction = 0; direction < kBlurDirections; ++direction) {
-                const float angle = kTau * static_cast<float>(direction) / static_cast<float>(kBlurDirections);
-                const float dir_x = std::cos(angle);
-                const float dir_y = std::sin(angle);
-                for (int quality = 1; quality <= kBlurQuality; ++quality) {
-                    const float t = static_cast<float>(quality) / static_cast<float>(kBlurQuality);
-                    draw_blur_pass(dir_x * blur_size * t, dir_y * blur_size * t, blur_weight);
-                }
-            }
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            modern_gl_draw_backdrop_blur_vertices(pass_vertices.data(), pass_vertices.size(), width, height,
+                                                  backdrop_texture_, blur_amount, mix_amount, uv_min_x, uv_min_y,
+                                                  uv_max_x, uv_max_y);
         };
 
         auto append_transformed_brush_mesh = [&](const DrawCommand& cmd) -> bool {

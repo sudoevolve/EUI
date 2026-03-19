@@ -10,6 +10,26 @@ function(eui_apply_example_warnings target_name)
     endif()
 endfunction()
 
+function(eui_can_fetch_git_repository repository out_can_fetch)
+    set(can_fetch OFF)
+
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" ls-remote --heads "${repository}"
+            RESULT_VARIABLE git_result
+            OUTPUT_QUIET
+            ERROR_QUIET
+            TIMEOUT 8
+        )
+        if(git_result EQUAL 0)
+            set(can_fetch ON)
+        endif()
+    endif()
+
+    set(${out_can_fetch} "${can_fetch}" PARENT_SCOPE)
+endfunction()
+
 function(eui_read_example_config source_file out_backend out_platform out_mode)
     file(READ "${source_file}" source_text LIMIT 4096)
 
@@ -143,27 +163,35 @@ function(eui_find_glfw_target out_target allow_fetch)
     endif()
 
     if(NOT glfw_target AND allow_fetch AND EUI_FETCH_GLFW_FROM_GIT)
-        message(STATUS "GLFW not found locally. Fetching from Git (${EUI_GLFW_GIT_TAG})...")
+        eui_can_fetch_git_repository("https://github.com/glfw/glfw.git" glfw_can_fetch)
+        if(glfw_can_fetch)
+            message(STATUS "GLFW not found locally. Fetching from Git (${EUI_GLFW_GIT_TAG})...")
 
-        set(GLFW_BUILD_DOCS OFF CACHE BOOL "Disable GLFW docs" FORCE)
-        set(GLFW_BUILD_TESTS OFF CACHE BOOL "Disable GLFW tests" FORCE)
-        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Disable GLFW examples" FORCE)
-        set(GLFW_INSTALL OFF CACHE BOOL "Disable GLFW install target" FORCE)
+            set(GLFW_BUILD_DOCS OFF CACHE BOOL "Disable GLFW docs" FORCE)
+            set(GLFW_BUILD_TESTS OFF CACHE BOOL "Disable GLFW tests" FORCE)
+            set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Disable GLFW examples" FORCE)
+            set(GLFW_INSTALL OFF CACHE BOOL "Disable GLFW install target" FORCE)
 
-        FetchContent_Declare(
-            glfw
-            GIT_REPOSITORY https://github.com/glfw/glfw.git
-            GIT_TAG ${EUI_GLFW_GIT_TAG}
-            GIT_SHALLOW TRUE
-        )
-        FetchContent_MakeAvailable(glfw)
+            FetchContent_Declare(
+                glfw
+                GIT_REPOSITORY https://github.com/glfw/glfw.git
+                GIT_TAG ${EUI_GLFW_GIT_TAG}
+                GIT_SHALLOW TRUE
+            )
+            FetchContent_MakeAvailable(glfw)
 
-        if(TARGET glfw)
-            set(glfw_target glfw)
-        elseif(TARGET glfw3::glfw)
-            set(glfw_target glfw3::glfw)
-        elseif(TARGET glfw3)
-            set(glfw_target glfw3)
+            if(TARGET glfw)
+                set(glfw_target glfw)
+            elseif(TARGET glfw3::glfw)
+                set(glfw_target glfw3::glfw)
+            elseif(TARGET glfw3)
+                set(glfw_target glfw3)
+            endif()
+        else()
+            message(WARNING
+                "GLFW not found locally and Git fetch is unavailable right now. "
+                "Skipping GLFW-backed examples."
+            )
         endif()
     endif()
 
@@ -188,29 +216,37 @@ function(eui_find_sdl2_target out_target out_include_dirs allow_fetch)
     endif()
 
     if(NOT sdl2_target AND allow_fetch AND EUI_FETCH_SDL2_FROM_GIT)
-        message(STATUS "SDL2 not found locally. Fetching from Git (${EUI_SDL2_GIT_TAG})...")
+        eui_can_fetch_git_repository("https://github.com/libsdl-org/SDL.git" sdl2_can_fetch)
+        if(sdl2_can_fetch)
+            message(STATUS "SDL2 not found locally. Fetching from Git (${EUI_SDL2_GIT_TAG})...")
 
-        set(SDL_SHARED OFF CACHE BOOL "Disable shared SDL2 target" FORCE)
-        set(SDL_STATIC ON CACHE BOOL "Enable static SDL2 target" FORCE)
-        set(SDL_TEST_LIBRARY OFF CACHE BOOL "Disable SDL2 test library" FORCE)
-        set(SDL_TESTS OFF CACHE BOOL "Disable SDL2 tests" FORCE)
+            set(SDL_SHARED OFF CACHE BOOL "Disable shared SDL2 target" FORCE)
+            set(SDL_STATIC ON CACHE BOOL "Enable static SDL2 target" FORCE)
+            set(SDL_TEST_LIBRARY OFF CACHE BOOL "Disable SDL2 test library" FORCE)
+            set(SDL_TESTS OFF CACHE BOOL "Disable SDL2 tests" FORCE)
 
-        FetchContent_Declare(
-            sdl2
-            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-            GIT_TAG ${EUI_SDL2_GIT_TAG}
-            GIT_SHALLOW TRUE
-        )
-        FetchContent_MakeAvailable(sdl2)
+            FetchContent_Declare(
+                sdl2
+                GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+                GIT_TAG ${EUI_SDL2_GIT_TAG}
+                GIT_SHALLOW TRUE
+            )
+            FetchContent_MakeAvailable(sdl2)
 
-        if(TARGET SDL2::SDL2)
-            set(sdl2_target SDL2::SDL2)
-        elseif(TARGET SDL2::SDL2-static)
-            set(sdl2_target SDL2::SDL2-static)
-        elseif(TARGET SDL2-static)
-            set(sdl2_target SDL2-static)
-        elseif(TARGET SDL2)
-            set(sdl2_target SDL2)
+            if(TARGET SDL2::SDL2)
+                set(sdl2_target SDL2::SDL2)
+            elseif(TARGET SDL2::SDL2-static)
+                set(sdl2_target SDL2::SDL2-static)
+            elseif(TARGET SDL2-static)
+                set(sdl2_target SDL2-static)
+            elseif(TARGET SDL2)
+                set(sdl2_target SDL2)
+            endif()
+        else()
+            message(WARNING
+                "SDL2 not found locally and Git fetch is unavailable right now. "
+                "Skipping SDL2-backed examples."
+            )
         endif()
     endif()
 
@@ -394,7 +430,7 @@ function(eui_configure_examples)
             "eui_quick_syntax_demo=basic_widgets_demo"
             "eui_sidebar_navigation_demo=sidebar_navigation_demo"
             "eui_calculator_demo=calculator_demo"
-            "eui_reference_dashboard_demo=graphics_showcase_demo"
+            "eui_reference_dashboard_demo=reference_dashboard_demo"
         )
         foreach(legacy_alias IN LISTS EUI_LEGACY_EXAMPLE_TARGET_MAP)
             string(REPLACE "=" ";" legacy_parts "${legacy_alias}")

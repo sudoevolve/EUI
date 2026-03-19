@@ -103,6 +103,9 @@ struct ModernGlSharedState {
     GLint viewport_uniform{-1};
     GLint texture_uniform{-1};
     GLint texture_mode_uniform{-1};
+    GLint blur_params_uniform{-1};
+    GLint blur_uv_min_uniform{-1};
+    GLint blur_uv_max_uniform{-1};
 
     GlCreateShaderProc create_shader{nullptr};
     GlShaderSourceProc shader_source{nullptr};
@@ -261,7 +264,11 @@ inline bool modern_gl_link_program(GLuint vertex_shader, GLuint fragment_shader)
     state.viewport_uniform = state.get_uniform_location(state.program, "u_viewport");
     state.texture_uniform = state.get_uniform_location(state.program, "u_texture");
     state.texture_mode_uniform = state.get_uniform_location(state.program, "u_texture_mode");
-    if (state.viewport_uniform < 0 || state.texture_uniform < 0 || state.texture_mode_uniform < 0) {
+    state.blur_params_uniform = state.get_uniform_location(state.program, "u_blur_params");
+    state.blur_uv_min_uniform = state.get_uniform_location(state.program, "u_blur_uv_min");
+    state.blur_uv_max_uniform = state.get_uniform_location(state.program, "u_blur_uv_max");
+    if (state.viewport_uniform < 0 || state.texture_uniform < 0 || state.texture_mode_uniform < 0 ||
+        state.blur_params_uniform < 0 || state.blur_uv_min_uniform < 0 || state.blur_uv_max_uniform < 0) {
         return modern_gl_report_error_once("EUI modern GL: failed to resolve shader uniforms.");
     }
     return true;
@@ -332,14 +339,40 @@ inline bool modern_gl_ensure_ready() {
     static constexpr const char* k_fragment_shader_source_desktop =
         "uniform sampler2D u_texture;\n"
         "uniform int u_texture_mode;\n"
+        "uniform vec2 u_blur_params;\n"
+        "uniform vec2 u_blur_uv_min;\n"
+        "uniform vec2 u_blur_uv_max;\n"
         "varying vec4 v_color;\n"
         "varying vec2 v_uv;\n"
+        "float blur_rand(vec2 co) {\n"
+        "  return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);\n"
+        "}\n"
         "void main() {\n"
         "  vec4 color = v_color;\n"
         "  if (u_texture_mode == 1) {\n"
         "    color *= vec4(1.0, 1.0, 1.0, texture2D(u_texture, v_uv).r);\n"
         "  } else if (u_texture_mode == 2) {\n"
         "    color *= texture2D(u_texture, v_uv);\n"
+        "  } else if (u_texture_mode == 3) {\n"
+        "    vec4 base = texture2D(u_texture, v_uv);\n"
+        "    vec4 blurred = vec4(0.0);\n"
+        "    float blur_amount = u_blur_params.x;\n"
+        "    float mix_alpha = clamp(u_blur_params.y, 0.0, 1.0);\n"
+        "    const int repeats = 24;\n"
+        "    const float tau = 6.28318530718;\n"
+        "    for (int i = 0; i < repeats; ++i) {\n"
+        "      float fi = float(i);\n"
+        "      float angle = (fi / float(repeats)) * tau;\n"
+        "      vec2 dir = vec2(cos(angle), sin(angle));\n"
+        "      float j0 = blur_rand(vec2(fi, v_uv.x + v_uv.y)) + blur_amount;\n"
+        "      vec2 uv0 = clamp(v_uv + dir * (j0 * blur_amount), u_blur_uv_min, u_blur_uv_max);\n"
+        "      blurred += texture2D(u_texture, uv0) * 0.5;\n"
+        "      float j1 = blur_rand(vec2(fi + 2.0, v_uv.x + v_uv.y + 24.0)) + blur_amount;\n"
+        "      vec2 uv1 = clamp(v_uv + dir * (j1 * blur_amount), u_blur_uv_min, u_blur_uv_max);\n"
+        "      blurred += texture2D(u_texture, uv1) * 0.5;\n"
+        "    }\n"
+        "    blurred /= float(repeats);\n"
+        "    color *= vec4(mix(base.rgb, blurred.rgb, mix_alpha), 1.0);\n"
         "  }\n"
         "  gl_FragColor = color;\n"
         "}\n";
@@ -348,14 +381,40 @@ inline bool modern_gl_ensure_ready() {
         "precision mediump float;\n"
         "uniform sampler2D u_texture;\n"
         "uniform int u_texture_mode;\n"
+        "uniform vec2 u_blur_params;\n"
+        "uniform vec2 u_blur_uv_min;\n"
+        "uniform vec2 u_blur_uv_max;\n"
         "varying vec4 v_color;\n"
         "varying vec2 v_uv;\n"
+        "float blur_rand(vec2 co) {\n"
+        "  return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);\n"
+        "}\n"
         "void main() {\n"
         "  vec4 color = v_color;\n"
         "  if (u_texture_mode == 1) {\n"
         "    color *= vec4(1.0, 1.0, 1.0, texture2D(u_texture, v_uv).r);\n"
         "  } else if (u_texture_mode == 2) {\n"
         "    color *= texture2D(u_texture, v_uv);\n"
+        "  } else if (u_texture_mode == 3) {\n"
+        "    vec4 base = texture2D(u_texture, v_uv);\n"
+        "    vec4 blurred = vec4(0.0);\n"
+        "    float blur_amount = u_blur_params.x;\n"
+        "    float mix_alpha = clamp(u_blur_params.y, 0.0, 1.0);\n"
+        "    const int repeats = 24;\n"
+        "    const float tau = 6.28318530718;\n"
+        "    for (int i = 0; i < repeats; ++i) {\n"
+        "      float fi = float(i);\n"
+        "      float angle = (fi / float(repeats)) * tau;\n"
+        "      vec2 dir = vec2(cos(angle), sin(angle));\n"
+        "      float j0 = blur_rand(vec2(fi, v_uv.x + v_uv.y)) + blur_amount;\n"
+        "      vec2 uv0 = clamp(v_uv + dir * (j0 * blur_amount), u_blur_uv_min, u_blur_uv_max);\n"
+        "      blurred += texture2D(u_texture, uv0) * 0.5;\n"
+        "      float j1 = blur_rand(vec2(fi + 2.0, v_uv.x + v_uv.y + 24.0)) + blur_amount;\n"
+        "      vec2 uv1 = clamp(v_uv + dir * (j1 * blur_amount), u_blur_uv_min, u_blur_uv_max);\n"
+        "      blurred += texture2D(u_texture, uv1) * 0.5;\n"
+        "    }\n"
+        "    blurred /= float(repeats);\n"
+        "    color *= vec4(mix(base.rgb, blurred.rgb, mix_alpha), 1.0);\n"
         "  }\n"
         "  gl_FragColor = color;\n"
         "}\n";
@@ -503,4 +562,56 @@ inline bool modern_gl_draw_vertices_current_viewport(GLenum primitive, const Mod
     glGetIntegerv(GL_VIEWPORT, viewport);
     return modern_gl_draw_vertices(primitive, vertices, vertex_count, std::max(1, viewport[2]),
                                    std::max(1, viewport[3]), texture, texture_mode);
+}
+
+inline bool modern_gl_draw_backdrop_blur_vertices(const ModernGlVertex* vertices, std::size_t vertex_count, int width,
+                                                  int height, GLuint texture, float blur_amount, float mix_alpha,
+                                                  float uv_min_x, float uv_min_y, float uv_max_x, float uv_max_y) {
+    if (vertices == nullptr || vertex_count == 0u) {
+        return true;
+    }
+    if (!modern_gl_ensure_ready()) {
+        return false;
+    }
+
+    ModernGlSharedState& state = modern_gl_shared_state();
+    state.use_program(state.program);
+    state.uniform_2f(state.viewport_uniform, static_cast<float>(std::max(1, width)),
+                     static_cast<float>(std::max(1, height)));
+    state.uniform_1i(state.texture_uniform, 0);
+    state.uniform_1i(state.texture_mode_uniform, 3);
+    state.uniform_2f(state.blur_params_uniform, blur_amount, mix_alpha);
+    state.uniform_2f(state.blur_uv_min_uniform, uv_min_x, uv_min_y);
+    state.uniform_2f(state.blur_uv_max_uniform, uv_max_x, uv_max_y);
+    state.active_texture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    state.bind_buffer(GL_ARRAY_BUFFER, state.vbo);
+    const std::size_t required_bytes = vertex_count * sizeof(ModernGlVertex);
+    if (required_bytes > state.vbo_capacity_bytes) {
+        state.vbo_capacity_bytes = modern_gl_next_buffer_capacity(required_bytes);
+        state.buffer_data(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(state.vbo_capacity_bytes), nullptr,
+                          GL_DYNAMIC_DRAW);
+    }
+    state.buffer_sub_data(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(required_bytes), vertices);
+
+    state.enable_vertex_attrib_array(0u);
+    state.enable_vertex_attrib_array(1u);
+    state.enable_vertex_attrib_array(2u);
+    state.vertex_attrib_pointer(0u, 2, GL_FLOAT, GL_FALSE, sizeof(ModernGlVertex),
+                                reinterpret_cast<const void*>(offsetof(ModernGlVertex, x)));
+    state.vertex_attrib_pointer(1u, 4, GL_FLOAT, GL_FALSE, sizeof(ModernGlVertex),
+                                reinterpret_cast<const void*>(offsetof(ModernGlVertex, r)));
+    state.vertex_attrib_pointer(2u, 2, GL_FLOAT, GL_FALSE, sizeof(ModernGlVertex),
+                                reinterpret_cast<const void*>(offsetof(ModernGlVertex, u)));
+
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertex_count));
+
+    state.disable_vertex_attrib_array(2u);
+    state.disable_vertex_attrib_array(1u);
+    state.disable_vertex_attrib_array(0u);
+    state.bind_buffer(GL_ARRAY_BUFFER, 0u);
+    glBindTexture(GL_TEXTURE_2D, 0u);
+    state.use_program(0u);
+    return true;
 }

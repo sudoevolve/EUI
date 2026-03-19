@@ -178,19 +178,6 @@ Runtime options in `eui::app::AppOptions` include:
 - icon font family, file
 - `TextBackend::Auto | Stb | Win32`
 
-## Rendering Model
-
-The renderer is built around keeping desktop UI redraws cheap:
-
-- frame hashing to skip identical redraws
-- dirty-region diff between frames
-- cached framebuffer reuse
-- partial redraw with scissor regions
-- event-driven rendering by default
-- redraw requests only while interaction or motion is still active
-
-This is why EUI works best when you treat UI as mostly static with small bursts of interaction, not as a constantly animating full-screen scene.
-
 ## Minimal App Example
 
 ```cpp
@@ -264,12 +251,3 @@ cmake --build build
 ```
 
 If no enabled local window backend is found, example targets are skipped. For local development, the simplest route is to keep the backend macros in your example source and let CMake wire whichever backend is available.
-
-## Docs
-
-`docs/README.md` lists the small remaining documentation set. The current repo direction is:
-
-- modern GL as the primary route
-- GLFW and SDL2 on the same renderer path
-- OpenGL ES as a compatibility branch under OpenGL
-- Vulkan still pending

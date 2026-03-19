@@ -183,6 +183,27 @@ inline bool compute_dirty_regions(const std::vector<DrawCommand>& commands,
         return false;
     }
 
+    const std::size_t base_region_count = out_regions.size();
+    for (const DrawCommand& cmd : commands) {
+        if (cmd.type != CommandType::BackdropBlur) {
+            continue;
+        }
+        const Rect blur_rect = command_visible_rect(cmd);
+        if (blur_rect.w <= 0.0f || blur_rect.h <= 0.0f) {
+            continue;
+        }
+        bool overlaps_dirty = false;
+        for (std::size_t i = 0; i < base_region_count; ++i) {
+            if (rect_intersects(blur_rect, out_regions[i])) {
+                overlaps_dirty = true;
+                break;
+            }
+        }
+        if (overlaps_dirty) {
+            append_dirty_rect(blur_rect, width, height, out_regions);
+        }
+    }
+
     merge_dirty_overlaps(out_regions, width, height);
     return true;
 }
