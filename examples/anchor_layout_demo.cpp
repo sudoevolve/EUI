@@ -73,6 +73,7 @@ void draw_layout_stage(UI& ui, const Rect& rect, float scale) {
         .stroke(0x29425B, 1.0f)
         .begin([&](auto& stage) {
             const Rect host = stage.content();
+
             ui.scope(host, [&](auto& scope) {
                 const Rect header = scope.dock_top(dp(68.0f), dp(12.0f));
                 const Rect sidebar = scope.dock_left(dp(150.0f), dp(12.0f));
@@ -105,6 +106,7 @@ int main() {
         [&](eui::app::FrameContext frame) {
             auto& ctx = frame.context();
             const auto metrics = frame.window_metrics();
+
             const float scale = std::max(1.0f, metrics.dpi_scale);
             const auto dp = [scale](float value) { return value * scale; };
 

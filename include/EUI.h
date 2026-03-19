@@ -221,6 +221,11 @@ public:
         commands_.reserve(1024);
         scope_stack_.reserve(24);
         text_arena_.reserve(16 * 1024);
+        brush_payloads_.reserve(128);
+        transform_payloads_.reserve(64);
+        brush_payload_lookup_.reserve(128);
+        transform_payload_lookup_.reserve(64);
+        brush_payload_ref_counts_.reserve(128);
         input_buffer_.reserve(64);
         theme_.radius = corner_radius_;
     }
@@ -280,6 +285,7 @@ public:
         motion_frame_id_ += 1u;
         if ((motion_frame_id_ & 63u) == 0u) {
             prune_motion_states();
+            prune_persistent_states();
         }
         if (has_prev_input_time_) {
             const double dt = input_.time_seconds - prev_input_time_;
@@ -291,6 +297,11 @@ public:
         prev_input_time_ = input_.time_seconds;
         commands_.clear();
         text_arena_.clear();
+        brush_payloads_.clear();
+        transform_payloads_.clear();
+        brush_payload_lookup_.clear();
+        transform_payload_lookup_.clear();
+        brush_payload_ref_counts_.clear();
         flush_row();
         flush_flex_row();
         scope_stack_.clear();
@@ -312,22 +323,40 @@ public:
         return commands_;
     }
 
-    void take_frame(std::vector<DrawCommand>& out_commands, std::vector<char>& out_text_arena) {
+    void take_frame(std::vector<DrawCommand>& out_commands, std::vector<char>& out_text_arena,
+                    std::vector<eui::graphics::Brush>& out_brush_payloads,
+                    std::vector<eui::graphics::Transform3D>& out_transform_payloads) {
         finalize_frame_state();
         out_commands.clear();
         out_text_arena.clear();
+        out_brush_payloads.clear();
+        out_transform_payloads.clear();
         out_commands.swap(commands_);
         out_text_arena.swap(text_arena_);
-        const std::size_t cmd_cap = out_commands.capacity();
-        const std::size_t text_cap = out_text_arena.capacity();
-        commands_.clear();
-        text_arena_.clear();
-        if (commands_.capacity() < cmd_cap) {
-            commands_.reserve(cmd_cap);
-        }
-        if (text_arena_.capacity() < text_cap) {
-            text_arena_.reserve(text_cap);
-        }
+        out_brush_payloads.swap(brush_payloads_);
+        out_transform_payloads.swap(transform_payloads_);
+        brush_payload_lookup_.clear();
+        transform_payload_lookup_.clear();
+        brush_payload_ref_counts_.clear();
+        const std::size_t next_cmd_cap =
+            std::max<std::size_t>(1024u, out_commands.size() + out_commands.size() / 2u + 32u);
+        const std::size_t next_text_cap =
+            std::max<std::size_t>(16u * 1024u, out_text_arena.size() + out_text_arena.size() / 2u + 256u);
+        const std::size_t next_brush_cap =
+            std::max<std::size_t>(128u, out_brush_payloads.size() + out_brush_payloads.size() / 2u + 8u);
+        const std::size_t next_transform_cap =
+            std::max<std::size_t>(64u, out_transform_payloads.size() + out_transform_payloads.size() / 2u + 8u);
+        detail::context_retain_vector_hysteresis(commands_, next_cmd_cap, commands_trim_frames_, 120u);
+        detail::context_retain_vector_hysteresis(text_arena_, next_text_cap, text_arena_trim_frames_, 120u);
+        detail::context_retain_vector_hysteresis(brush_payloads_, next_brush_cap, brush_payload_trim_frames_, 120u);
+        detail::context_retain_vector_hysteresis(transform_payloads_, next_transform_cap,
+                                                 transform_payload_trim_frames_, 120u);
+        detail::context_retain_vector_hysteresis(brush_payload_lookup_, next_brush_cap,
+                                                 brush_payload_lookup_trim_frames_, 120u);
+        detail::context_retain_vector_hysteresis(transform_payload_lookup_, next_transform_cap,
+                                                 transform_payload_lookup_trim_frames_, 120u);
+        detail::context_retain_vector_hysteresis(brush_payload_ref_counts_, next_brush_cap,
+                                                 brush_payload_ref_counts_trim_frames_, 120u);
     }
 
     const std::vector<char>& text_arena() const {
@@ -355,6 +384,11 @@ public:
     }
 
 private:
+    struct PayloadLookupEntry {
+        std::uint64_t hash{0ull};
+        std::uint32_t index{DrawCommand::k_invalid_payload_index};
+    };
+
     void internal_push_layout_rect(const Rect& rect) {
         flush_row();
         flush_flex_row();
@@ -1139,7 +1173,7 @@ private:
         };
 
         const std::uint64_t id = id_for(label) ^ 0x3cd71be2458fe12bull;
-        ScrollAreaState& state = scroll_area_state_[id];
+        ScrollAreaState& state = touch_scroll_area_state(id);
         const float content_h = std::max(viewport.h, state.content_height);
         const float max_scroll = std::max(0.0f, content_h - viewport.h);
         const bool hovered_outer = outer.contains(input_.mouse_x, input_.mouse_y);
@@ -1374,7 +1408,7 @@ private:
         };
 
         const std::uint64_t id = id_for(label) ^ 0x5f8d37aa44c2e391ull;
-        TextAreaState& state = text_area_state_[id];
+        TextAreaState& state = touch_text_area_state(id);
         const bool hovered_box = box_rect.contains(input_.mouse_x, input_.mouse_y);
         bool editing = is_text_input_active(id);
         bool follow_caret = false;
@@ -1858,7 +1892,7 @@ private:
         const float max_scroll = std::max(0.0f, total_h - viewport_h);
 
         const std::uint64_t id = id_for(label) ^ 0x5f8d37aa44c2e391ull;
-        TextAreaState& state = text_area_state_[id];
+        TextAreaState& state = touch_text_area_state(id);
         const bool hovered_box = box_rect.contains(input_.mouse_x, input_.mouse_y);
         if (hovered_box && std::fabs(input_.mouse_wheel_y) > 1e-6f) {
             state.scroll = std::clamp(state.scroll - input_.mouse_wheel_y * line_h * 2.0f, 0.0f, max_scroll);
@@ -2103,6 +2137,44 @@ public:
         return requested;
     }
 
+    std::uint64_t motion_key(std::string_view label) const {
+        return id_for(label);
+    }
+
+    std::uint64_t motion_key(std::string_view label, std::uint64_t salt) const {
+        return hash_mix(id_for(label), salt);
+    }
+
+    std::uint64_t motion_key(std::uint64_t base, std::uint64_t salt) const {
+        return hash_mix(base, salt);
+    }
+
+    float motion(std::uint64_t id, float target, float speed = 10.0f) {
+        return update_motion_value(id, target, speed);
+    }
+
+    float motion(std::uint64_t id, float target, float rise_speed, float fall_speed) {
+        return update_motion_value(id, target, rise_speed, fall_speed);
+    }
+
+    float presence(std::uint64_t id, bool visible, float enter_speed = 12.0f, float exit_speed = 16.0f) {
+        return update_motion_value(id, visible ? 1.0f : 0.0f, enter_speed, exit_speed);
+    }
+
+    void reset_motion(std::uint64_t id, float value = 0.0f) {
+        MotionState& state = touch_motion_state(id);
+        state.value = value;
+        state.value_initialized = true;
+    }
+
+    float motion_value(std::uint64_t id, float fallback = 0.0f) const {
+        const auto it = motion_states_.find(id);
+        if (it == motion_states_.end() || !it->second.value_initialized) {
+            return fallback;
+        }
+        return it->second.value;
+    }
+
 private:
     void refresh_theme() {
         theme_ = make_theme(theme_mode_, primary_color_);
@@ -2167,6 +2239,218 @@ private:
             hash = hash_mix(hash, static_cast<std::uint64_t>(cmd.text_length));
         }
         return hash;
+    }
+
+    static bool float_bits_equal(float lhs, float rhs) {
+        return detail::context_float_bits(lhs) == detail::context_float_bits(rhs);
+    }
+
+    static bool graphics_color_equal(const eui::graphics::Color& lhs, const eui::graphics::Color& rhs) {
+        return float_bits_equal(lhs.r, rhs.r) && float_bits_equal(lhs.g, rhs.g) && float_bits_equal(lhs.b, rhs.b) &&
+               float_bits_equal(lhs.a, rhs.a);
+    }
+
+    static bool graphics_point_equal(const eui::graphics::Point& lhs, const eui::graphics::Point& rhs) {
+        return float_bits_equal(lhs.x, rhs.x) && float_bits_equal(lhs.y, rhs.y);
+    }
+
+    static bool graphics_color_stop_equal(const eui::graphics::ColorStop& lhs, const eui::graphics::ColorStop& rhs) {
+        return float_bits_equal(lhs.position, rhs.position) && graphics_color_equal(lhs.color, rhs.color);
+    }
+
+    static bool brush_payload_equal(const eui::graphics::Brush& lhs, const eui::graphics::Brush& rhs) {
+        if (lhs.kind != rhs.kind) {
+            return false;
+        }
+        switch (lhs.kind) {
+            case eui::graphics::BrushKind::solid:
+                return graphics_color_equal(lhs.solid, rhs.solid);
+            case eui::graphics::BrushKind::linear_gradient:
+                if (!graphics_point_equal(lhs.linear.start, rhs.linear.start) ||
+                    !graphics_point_equal(lhs.linear.end, rhs.linear.end) ||
+                    lhs.linear.stop_count != rhs.linear.stop_count) {
+                    return false;
+                }
+                for (std::size_t i = 0; i < lhs.linear.stop_count && i < lhs.linear.stops.size(); ++i) {
+                    if (!graphics_color_stop_equal(lhs.linear.stops[i], rhs.linear.stops[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            case eui::graphics::BrushKind::radial_gradient:
+                if (!graphics_point_equal(lhs.radial.center, rhs.radial.center) ||
+                    !float_bits_equal(lhs.radial.radius, rhs.radial.radius) ||
+                    lhs.radial.stop_count != rhs.radial.stop_count) {
+                    return false;
+                }
+                for (std::size_t i = 0; i < lhs.radial.stop_count && i < lhs.radial.stops.size(); ++i) {
+                    if (!graphics_color_stop_equal(lhs.radial.stops[i], rhs.radial.stops[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            case eui::graphics::BrushKind::none:
+            default:
+                return true;
+        }
+    }
+
+    static bool transform_payload_equal(const eui::graphics::Transform3D& lhs,
+                                        const eui::graphics::Transform3D& rhs) {
+        return float_bits_equal(lhs.translation_x, rhs.translation_x) &&
+               float_bits_equal(lhs.translation_y, rhs.translation_y) &&
+               float_bits_equal(lhs.translation_z, rhs.translation_z) && float_bits_equal(lhs.scale_x, rhs.scale_x) &&
+               float_bits_equal(lhs.scale_y, rhs.scale_y) && float_bits_equal(lhs.scale_z, rhs.scale_z) &&
+               float_bits_equal(lhs.rotation_x_deg, rhs.rotation_x_deg) &&
+               float_bits_equal(lhs.rotation_y_deg, rhs.rotation_y_deg) &&
+               float_bits_equal(lhs.rotation_z_deg, rhs.rotation_z_deg) &&
+               float_bits_equal(lhs.origin_x, rhs.origin_x) && float_bits_equal(lhs.origin_y, rhs.origin_y) &&
+               float_bits_equal(lhs.origin_z, rhs.origin_z) &&
+               float_bits_equal(lhs.perspective, rhs.perspective);
+    }
+
+    std::uint32_t store_brush_payload(const eui::graphics::Brush& brush) {
+        const std::uint64_t hash = hash_brush(brush);
+        for (const PayloadLookupEntry& entry : brush_payload_lookup_) {
+            if (entry.hash != hash || static_cast<std::size_t>(entry.index) >= brush_payloads_.size()) {
+                continue;
+            }
+            if (!brush_payload_equal(brush_payloads_[entry.index], brush)) {
+                continue;
+            }
+            if (static_cast<std::size_t>(entry.index) < brush_payload_ref_counts_.size()) {
+                brush_payload_ref_counts_[entry.index] += 1u;
+            }
+            return entry.index;
+        }
+        const std::uint32_t index = static_cast<std::uint32_t>(brush_payloads_.size());
+        brush_payloads_.push_back(brush);
+        brush_payload_lookup_.push_back(PayloadLookupEntry{hash, index});
+        brush_payload_ref_counts_.push_back(1u);
+        return index;
+    }
+
+    std::uint32_t store_transform_payload(const eui::graphics::Transform3D& transform) {
+        const std::uint64_t hash = hash_transform_3d(transform);
+        for (const PayloadLookupEntry& entry : transform_payload_lookup_) {
+            if (entry.hash != hash || static_cast<std::size_t>(entry.index) >= transform_payloads_.size()) {
+                continue;
+            }
+            if (transform_payload_equal(transform_payloads_[entry.index], transform)) {
+                return entry.index;
+            }
+        }
+        const std::uint32_t index = static_cast<std::uint32_t>(transform_payloads_.size());
+        transform_payloads_.push_back(transform);
+        transform_payload_lookup_.push_back(PayloadLookupEntry{hash, index});
+        return index;
+    }
+
+    const eui::graphics::Brush* command_brush_payload(const DrawCommand& cmd) const {
+        if (cmd.brush_payload_index == DrawCommand::k_invalid_payload_index ||
+            static_cast<std::size_t>(cmd.brush_payload_index) >= brush_payloads_.size()) {
+            return nullptr;
+        }
+        return &brush_payloads_[cmd.brush_payload_index];
+    }
+
+    const eui::graphics::Transform3D& command_transform(const DrawCommand& cmd) const {
+        static const eui::graphics::Transform3D identity{};
+        if (cmd.transform_payload_index == DrawCommand::k_invalid_payload_index ||
+            static_cast<std::size_t>(cmd.transform_payload_index) >= transform_payloads_.size()) {
+            return identity;
+        }
+        return transform_payloads_[cmd.transform_payload_index];
+    }
+
+    void release_command_brush_payload(DrawCommand& cmd) {
+        if (cmd.brush_payload_index == DrawCommand::k_invalid_payload_index ||
+            static_cast<std::size_t>(cmd.brush_payload_index) >= brush_payload_ref_counts_.size()) {
+            cmd.brush_payload_index = DrawCommand::k_invalid_payload_index;
+            return;
+        }
+        if (brush_payload_ref_counts_[cmd.brush_payload_index] > 0u) {
+            brush_payload_ref_counts_[cmd.brush_payload_index] -= 1u;
+        }
+        cmd.brush_payload_index = DrawCommand::k_invalid_payload_index;
+    }
+
+    void rebuild_command_payload_hash(DrawCommand& cmd) const {
+        std::uint64_t payload_hash = 0ull;
+        if (const eui::graphics::Brush* brush = command_brush_payload(cmd)) {
+            payload_hash = hash_brush(*brush);
+        }
+        if (cmd.transform_payload_index != DrawCommand::k_invalid_payload_index) {
+            payload_hash = hash_mix(payload_hash, hash_transform_3d(command_transform(cmd)));
+        }
+        cmd.payload_hash = payload_hash;
+    }
+
+    void update_command_visible_rect(DrawCommand& cmd) const {
+        Rect bounds = projected_rect_bounds(cmd.rect, command_transform(cmd));
+        if (!cmd.has_clip) {
+            cmd.visible_rect = bounds;
+            return;
+        }
+        Rect visible{};
+        if (!intersect_rects(bounds, cmd.clip_rect, visible)) {
+            cmd.visible_rect = Rect{};
+            return;
+        }
+        cmd.visible_rect = visible;
+    }
+
+    void refresh_command_metadata(DrawCommand& cmd, bool refresh_payload_hash = false) const {
+        if (refresh_payload_hash) {
+            rebuild_command_payload_hash(cmd);
+        }
+        update_command_visible_rect(cmd);
+        cmd.hash = hash_command(cmd);
+    }
+
+    void assign_command_brush_payload(DrawCommand& cmd, const eui::graphics::Brush& brush) {
+        release_command_brush_payload(cmd);
+        if (brush.kind == eui::graphics::BrushKind::linear_gradient ||
+            brush.kind == eui::graphics::BrushKind::radial_gradient) {
+            cmd.brush_payload_index = store_brush_payload(brush);
+        }
+        rebuild_command_payload_hash(cmd);
+    }
+
+    void assign_command_transform_payload(DrawCommand& cmd, const eui::graphics::Transform3D* transform_3d) {
+        cmd.transform_payload_index = DrawCommand::k_invalid_payload_index;
+        if (transform_3d != nullptr && !transform_3d_is_identity(*transform_3d)) {
+            cmd.transform_payload_index = store_transform_payload(*transform_3d);
+        }
+        rebuild_command_payload_hash(cmd);
+    }
+
+    void scale_command_brush_payload_alpha(DrawCommand& cmd, float alpha) {
+        if (cmd.brush_payload_index == DrawCommand::k_invalid_payload_index ||
+            static_cast<std::size_t>(cmd.brush_payload_index) >= brush_payloads_.size()) {
+            return;
+        }
+        const std::uint32_t current_index = cmd.brush_payload_index;
+        const eui::graphics::Brush scaled = scale_alpha(brush_payloads_[current_index], alpha);
+        if (brush_payload_equal(brush_payloads_[current_index], scaled)) {
+            rebuild_command_payload_hash(cmd);
+            return;
+        }
+        if (static_cast<std::size_t>(current_index) < brush_payload_ref_counts_.size() &&
+            brush_payload_ref_counts_[current_index] > 1u) {
+            brush_payload_ref_counts_[current_index] -= 1u;
+            cmd.brush_payload_index = store_brush_payload(scaled);
+            rebuild_command_payload_hash(cmd);
+            return;
+        }
+        brush_payloads_[current_index] = scaled;
+        const std::uint64_t scaled_hash = hash_brush(scaled);
+        for (PayloadLookupEntry& entry : brush_payload_lookup_) {
+            if (entry.index == current_index) {
+                entry.hash = scaled_hash;
+            }
+        }
+        rebuild_command_payload_hash(cmd);
     }
 
     std::uint64_t id_for(std::string_view label) const {
@@ -2269,6 +2553,18 @@ private:
         return state;
     }
 
+    TextAreaState& touch_text_area_state(std::uint64_t id) {
+        TextAreaState& state = text_area_state_[id];
+        state.last_touched_frame = motion_frame_id_;
+        return state;
+    }
+
+    ScrollAreaState& touch_scroll_area_state(std::uint64_t id) {
+        ScrollAreaState& state = scroll_area_state_[id];
+        state.last_touched_frame = motion_frame_id_;
+        return state;
+    }
+
     float animate_motion_channel(float current, float target, float speed) {
         if (near_value(current, target, 1.5e-3f)) {
             return target;
@@ -2314,6 +2610,18 @@ private:
         return state.value;
     }
 
+    float update_motion_value(std::uint64_t id, float target, float rise_speed, float fall_speed) {
+        MotionState& state = touch_motion_state(id);
+        if (!state.value_initialized) {
+            state.value = target;
+            state.value_initialized = true;
+            return target;
+        }
+        const float speed = (target >= state.value) ? rise_speed : fall_speed;
+        state.value = animate_motion_channel(state.value, target, speed);
+        return state.value;
+    }
+
     void prune_motion_states() {
         for (auto it = motion_states_.begin(); it != motion_states_.end();) {
             const std::uint64_t age = motion_frame_id_ - it->second.last_touched_frame;
@@ -2322,6 +2630,33 @@ private:
                                  (!it->second.value_initialized || near_value(it->second.value));
             if (age > 300u || (age > 96u && settled)) {
                 it = motion_states_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    void prune_persistent_states() {
+        for (auto it = text_area_state_.begin(); it != text_area_state_.end();) {
+            const std::uint64_t age = motion_frame_id_ - it->second.last_touched_frame;
+            const bool active =
+                active_input_id_ == it->first || active_textarea_scroll_id_ == it->first;
+            const bool settled = near_value(it->second.scroll) && it->second.preferred_x < 0.0f;
+            if (!active && (age > 1800u || (age > 240u && settled))) {
+                it = text_area_state_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        for (auto it = scroll_area_state_.begin(); it != scroll_area_state_.end();) {
+            const std::uint64_t age = motion_frame_id_ - it->second.last_touched_frame;
+            const bool active =
+                active_scroll_drag_id_ == it->first || active_scrollbar_drag_id_ == it->first;
+            const bool settled = near_value(it->second.scroll) && near_value(it->second.velocity) &&
+                                 near_value(it->second.content_height);
+            if (!active && (age > 1800u || (age > 360u && settled))) {
+                it = scroll_area_state_.erase(it);
             } else {
                 ++it;
             }
@@ -3051,7 +3386,7 @@ private:
             if (cmd.has_clip) {
                 cmd.clip_rect.y += dy;
             }
-            cmd.hash = hash_command(cmd);
+            refresh_command_metadata(cmd, false);
         }
     }
 
@@ -3152,24 +3487,24 @@ private:
             if (scope.fill_cmd_index < commands_.size()) {
                 commands_[scope.fill_cmd_index].rect.y = scope.top_y + shell_offset_y;
                 commands_[scope.fill_cmd_index].rect.h = display_height;
-                commands_[scope.fill_cmd_index].hash = hash_command(commands_[scope.fill_cmd_index]);
+                refresh_command_metadata(commands_[scope.fill_cmd_index], false);
             }
             if (scope.outline_cmd_index < commands_.size()) {
                 commands_[scope.outline_cmd_index].rect.y = scope.top_y + shell_offset_y;
                 commands_[scope.outline_cmd_index].rect.h = display_height;
-                commands_[scope.outline_cmd_index].hash = hash_command(commands_[scope.outline_cmd_index]);
+                refresh_command_metadata(commands_[scope.outline_cmd_index], false);
             }
             if (scope.glow_outer_cmd_index != k_invalid_command_index && scope.glow_outer_cmd_index < commands_.size()) {
                 commands_[scope.glow_outer_cmd_index].rect.y =
                     scope.top_y + shell_offset_y - scope.glow_outer_spread;
                 commands_[scope.glow_outer_cmd_index].rect.h = display_height + scope.glow_outer_spread * 2.0f;
-                commands_[scope.glow_outer_cmd_index].hash = hash_command(commands_[scope.glow_outer_cmd_index]);
+                refresh_command_metadata(commands_[scope.glow_outer_cmd_index], false);
             }
             if (scope.glow_inner_cmd_index != k_invalid_command_index && scope.glow_inner_cmd_index < commands_.size()) {
                 commands_[scope.glow_inner_cmd_index].rect.y =
                     scope.top_y + shell_offset_y - scope.glow_inner_spread;
                 commands_[scope.glow_inner_cmd_index].rect.h = display_height + scope.glow_inner_spread * 2.0f;
-                commands_[scope.glow_inner_cmd_index].hash = hash_command(commands_[scope.glow_inner_cmd_index]);
+                refresh_command_metadata(commands_[scope.glow_inner_cmd_index], false);
             }
             if (animate_dropdown && (content_offset_y > 1e-3f || content_alpha < 0.999f) &&
                 scope.content_cmd_begin < commands_.size()) {
@@ -3177,12 +3512,12 @@ private:
                     DrawCommand& cmd = commands_[i];
                     cmd.rect.y += content_offset_y;
                     cmd.color = scale_alpha(cmd.color, content_alpha);
-                    cmd.brush = scale_alpha(cmd.brush, content_alpha);
+                    scale_command_brush_payload_alpha(cmd, content_alpha);
                     cmd.effect_alpha = std::clamp(cmd.effect_alpha * content_alpha, 0.0f, 1.0f);
                     if (cmd.has_clip) {
                         cmd.clip_rect.y += content_offset_y;
                     }
-                    cmd.hash = hash_command(cmd);
+                    refresh_command_metadata(cmd, false);
                 }
             }
 
@@ -3385,16 +3720,15 @@ private:
         cmd.type = CommandType::FilledRect;
         cmd.rect = rect;
         cmd.color = scale_alpha(color, global_alpha_);
-        cmd.brush.kind = eui::graphics::BrushKind::solid;
-        cmd.brush.solid = to_graphics_color(cmd.color);
         if (cmd.color.a <= 1e-4f) {
             return;
         }
         cmd.radius = std::max(0.0f, radius);
+        assign_command_brush_payload(cmd, eui::graphics::Brush{});
         if (!apply_clip_to_command(cmd, nullptr)) {
             return;
         }
-        cmd.hash = hash_command_base(cmd);
+        refresh_command_metadata(cmd, false);
         commands_.push_back(std::move(cmd));
     }
 
@@ -3403,28 +3737,30 @@ private:
         DrawCommand cmd;
         cmd.type = CommandType::FilledRect;
         cmd.rect = rect;
-        cmd.brush = scale_alpha(brush, global_alpha_);
+        const eui::graphics::Brush scaled_brush = scale_alpha(brush, global_alpha_);
         bool has_visible_alpha = false;
 
-        switch (cmd.brush.kind) {
+        switch (scaled_brush.kind) {
             case eui::graphics::BrushKind::solid:
-                cmd.color = to_legacy_color(cmd.brush.solid);
-                has_visible_alpha = cmd.brush.solid.a > 1e-4f;
+                cmd.color = to_legacy_color(scaled_brush.solid);
+                has_visible_alpha = scaled_brush.solid.a > 1e-4f;
                 break;
             case eui::graphics::BrushKind::linear_gradient:
-                if (cmd.brush.linear.stop_count > 0u) {
-                    cmd.color = to_legacy_color(cmd.brush.linear.stops[0].color);
+                if (scaled_brush.linear.stop_count > 0u) {
+                    cmd.color = to_legacy_color(scaled_brush.linear.stops[0].color);
                 }
-                for (std::size_t i = 0; i < cmd.brush.linear.stop_count && i < cmd.brush.linear.stops.size(); ++i) {
-                    has_visible_alpha = has_visible_alpha || cmd.brush.linear.stops[i].color.a > 1e-4f;
+                for (std::size_t i = 0; i < scaled_brush.linear.stop_count && i < scaled_brush.linear.stops.size();
+                     ++i) {
+                    has_visible_alpha = has_visible_alpha || scaled_brush.linear.stops[i].color.a > 1e-4f;
                 }
                 break;
             case eui::graphics::BrushKind::radial_gradient:
-                if (cmd.brush.radial.stop_count > 0u) {
-                    cmd.color = to_legacy_color(cmd.brush.radial.stops[0].color);
+                if (scaled_brush.radial.stop_count > 0u) {
+                    cmd.color = to_legacy_color(scaled_brush.radial.stops[0].color);
                 }
-                for (std::size_t i = 0; i < cmd.brush.radial.stop_count && i < cmd.brush.radial.stops.size(); ++i) {
-                    has_visible_alpha = has_visible_alpha || cmd.brush.radial.stops[i].color.a > 1e-4f;
+                for (std::size_t i = 0; i < scaled_brush.radial.stop_count && i < scaled_brush.radial.stops.size();
+                     ++i) {
+                    has_visible_alpha = has_visible_alpha || scaled_brush.radial.stops[i].color.a > 1e-4f;
                 }
                 break;
             case eui::graphics::BrushKind::none:
@@ -3436,13 +3772,12 @@ private:
             return;
         }
         cmd.radius = std::max(0.0f, radius);
-        if (transform_3d != nullptr) {
-            cmd.transform_3d = *transform_3d;
-        }
+        assign_command_brush_payload(cmd, scaled_brush);
+        assign_command_transform_payload(cmd, transform_3d);
         if (!apply_clip_to_command(cmd, nullptr)) {
             return;
         }
-        cmd.hash = hash_command_base(cmd);
+        refresh_command_metadata(cmd, false);
         commands_.push_back(std::move(cmd));
     }
 
@@ -3460,17 +3795,14 @@ private:
         if (cmd.color.a <= 1e-4f) {
             return;
         }
-        cmd.brush.kind = eui::graphics::BrushKind::solid;
-        cmd.brush.solid = to_graphics_color(cmd.color);
         cmd.radius = std::max(0.0f, radius);
         cmd.thickness = std::max(1.0f, thickness);
-        if (transform_3d != nullptr) {
-            cmd.transform_3d = *transform_3d;
-        }
+        assign_command_brush_payload(cmd, eui::graphics::Brush{});
+        assign_command_transform_payload(cmd, transform_3d);
         if (!apply_clip_to_command(cmd, nullptr)) {
             return;
         }
-        cmd.hash = hash_command_base(cmd);
+        refresh_command_metadata(cmd, false);
         commands_.push_back(std::move(cmd));
     }
 
@@ -3488,13 +3820,11 @@ private:
         cmd.radius = std::max(0.0f, radius);
         cmd.blur_radius = effective_radius;
         cmd.effect_alpha = effective_alpha;
-        if (transform_3d != nullptr) {
-            cmd.transform_3d = *transform_3d;
-        }
+        assign_command_transform_payload(cmd, transform_3d);
         if (!apply_clip_to_command(cmd, nullptr)) {
             return;
         }
-        cmd.hash = hash_command_base(cmd);
+        refresh_command_metadata(cmd, false);
         commands_.push_back(std::move(cmd));
     }
 
@@ -3518,8 +3848,7 @@ private:
         text_arena_.insert(text_arena_.end(), text.begin(), text.end());
         cmd.text_offset = offset;
         cmd.text_length = length;
-        cmd.hash = hash_mix(hash_command_base(cmd), hash_sv(text));
-        cmd.hash = hash_mix(cmd.hash, static_cast<std::uint64_t>(length));
+        refresh_command_metadata(cmd, false);
         commands_.push_back(std::move(cmd));
     }
 
@@ -3536,7 +3865,7 @@ private:
         if (!apply_clip_to_command(cmd, nullptr)) {
             return;
         }
-        cmd.hash = hash_command_base(cmd);
+        refresh_command_metadata(cmd, false);
         commands_.push_back(std::move(cmd));
     }
 
@@ -3552,6 +3881,11 @@ private:
     std::vector<DrawCommand> commands_{};
     std::vector<ScopeState> scope_stack_{};
     std::vector<char> text_arena_{};
+    std::vector<eui::graphics::Brush> brush_payloads_{};
+    std::vector<eui::graphics::Transform3D> transform_payloads_{};
+    std::vector<PayloadLookupEntry> brush_payload_lookup_{};
+    std::vector<PayloadLookupEntry> transform_payload_lookup_{};
+    std::vector<std::uint32_t> brush_payload_ref_counts_{};
     std::vector<LayoutRectState> layout_rect_stack_{};
 
     RowState row_{};
@@ -3592,6 +3926,13 @@ private:
     std::unordered_map<std::uint64_t, ScrollAreaState> scroll_area_state_{};
     std::unordered_map<std::uint64_t, MotionState> motion_states_{};
     std::uint64_t motion_frame_id_{0u};
+    std::uint32_t commands_trim_frames_{0u};
+    std::uint32_t text_arena_trim_frames_{0u};
+    std::uint32_t brush_payload_trim_frames_{0u};
+    std::uint32_t transform_payload_trim_frames_{0u};
+    std::uint32_t brush_payload_lookup_trim_frames_{0u};
+    std::uint32_t transform_payload_lookup_trim_frames_{0u};
+    std::uint32_t brush_payload_ref_counts_trim_frames_{0u};
     std::vector<Rect> clip_stack_{};
     Rect panel_rect_{};
 };

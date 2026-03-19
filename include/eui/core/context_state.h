@@ -60,12 +60,14 @@ struct ContextLayoutRectState {
 struct ContextTextAreaState {
     float scroll{0.0f};
     float preferred_x{-1.0f};
+    std::uint64_t last_touched_frame{0u};
 };
 
 struct ContextScrollAreaState {
     float scroll{0.0f};
     float velocity{0.0f};
     float content_height{0.0f};
+    std::uint64_t last_touched_frame{0u};
 };
 
 struct ContextMotionState {

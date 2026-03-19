@@ -283,7 +283,8 @@ int run_with_sdl2(BuildUiFn&& build_ui, const AppOptions& options = {}) {
         if (ui.consume_repaint_request()) {
             request_next_frame = true;
         }
-        ui.take_frame(runtime.curr_commands, runtime.curr_text_arena);
+        ui.take_frame(runtime.curr_commands, runtime.curr_text_arena, runtime.curr_brush_payloads,
+                      runtime.curr_transform_payloads);
         std::string clipboard_write_text;
         if (ui.consume_clipboard_write(clipboard_write_text)) {
             SDL_SetClipboardText(clipboard_write_text.c_str());
@@ -293,22 +294,23 @@ int run_with_sdl2(BuildUiFn&& build_ui, const AppOptions& options = {}) {
         const Color bg = ui.theme().background;
         const auto& commands = runtime.curr_commands;
         const auto& text_arena = runtime.curr_text_arena;
-        detail::ensure_cache_texture(runtime, framebuffer_w, framebuffer_h);
+        const auto& brush_payloads = runtime.curr_brush_payloads;
+        const auto& transform_payloads = runtime.curr_transform_payloads;
         const std::uint64_t frame_hash = detail::hash_frame_payload(commands, bg);
 
-        const bool force_full_redraw =
-            framebuffer_changed || !runtime.has_prev_frame || !runtime.has_cache;
+        const bool hard_full_redraw = framebuffer_changed || !runtime.has_prev_frame;
+        const bool cache_missing = !runtime.has_cache;
+        const bool force_full_redraw = hard_full_redraw || cache_missing;
         bool has_dirty = false;
         runtime.dirty_regions.clear();
         if (!force_full_redraw && runtime.has_prev_frame && runtime.prev_frame_hash == frame_hash) {
             has_dirty = false;
         } else {
-            has_dirty =
-                detail::compute_dirty_regions(commands, text_arena, runtime, bg, framebuffer_w, framebuffer_h,
-                                              force_full_redraw, runtime.dirty_regions);
+            has_dirty = detail::compute_dirty_regions(commands, runtime, bg, framebuffer_w, framebuffer_h,
+                                                      hard_full_redraw, runtime.dirty_regions);
         }
         bool prefer_full_redraw = false;
-        if (!force_full_redraw && has_dirty) {
+        if (!hard_full_redraw && has_dirty) {
             float dirty_area = 0.0f;
             for (const Rect& dirty : runtime.dirty_regions) {
                 dirty_area += std::max(0.0f, dirty.w) * std::max(0.0f, dirty.h);
@@ -321,8 +323,9 @@ int run_with_sdl2(BuildUiFn&& build_ui, const AppOptions& options = {}) {
         const bool use_full_redraw = force_full_redraw || prefer_full_redraw;
 
         if (!use_full_redraw && !has_dirty) {
-            runtime.prev_commands.swap(runtime.curr_commands);
-            runtime.prev_text_arena.swap(runtime.curr_text_arena);
+            detail::update_prev_command_cache(runtime, commands);
+            detail::trim_dirty_region_cache(runtime);
+            detail::update_cache_lifecycle(runtime);
             runtime.prev_bg = bg;
             runtime.prev_frame_hash = frame_hash;
             runtime.has_prev_frame = true;
@@ -337,8 +340,14 @@ int run_with_sdl2(BuildUiFn&& build_ui, const AppOptions& options = {}) {
             glDisable(GL_SCISSOR_TEST);
             glClearColor(bg.r, bg.g, bg.b, bg.a);
             glClear(GL_COLOR_BUFFER_BIT);
-            renderer.render(commands, text_arena, framebuffer_w, framebuffer_h, nullptr);
-            detail::copy_full_to_cache(runtime, framebuffer_w, framebuffer_h);
+            renderer.render(commands, text_arena, brush_payloads, transform_payloads, framebuffer_w, framebuffer_h,
+                            nullptr, frame_hash);
+            if (!prefer_full_redraw || hard_full_redraw) {
+                detail::ensure_cache_texture(runtime, framebuffer_w, framebuffer_h);
+                detail::copy_full_to_cache(runtime, framebuffer_w, framebuffer_h);
+            } else {
+                runtime.has_cache = false;
+            }
         } else {
             detail::draw_cache_texture(runtime, framebuffer_w, framebuffer_h);
             for (const Rect& dirty : runtime.dirty_regions) {
@@ -348,15 +357,17 @@ int run_with_sdl2(BuildUiFn&& build_ui, const AppOptions& options = {}) {
                     glScissor(gl_dirty.x, gl_dirty.y, gl_dirty.w, gl_dirty.h);
                     glClearColor(bg.r, bg.g, bg.b, bg.a);
                     glClear(GL_COLOR_BUFFER_BIT);
-                    renderer.render(commands, text_arena, framebuffer_w, framebuffer_h, &dirty);
+                    renderer.render(commands, text_arena, brush_payloads, transform_payloads, framebuffer_w,
+                                    framebuffer_h, &dirty, frame_hash);
                     detail::copy_region_to_cache(runtime, gl_dirty);
                 }
             }
             glDisable(GL_SCISSOR_TEST);
         }
 
-        runtime.prev_commands.swap(runtime.curr_commands);
-        runtime.prev_text_arena.swap(runtime.curr_text_arena);
+        detail::update_prev_command_cache(runtime, commands);
+        detail::trim_dirty_region_cache(runtime);
+        detail::update_cache_lifecycle(runtime);
         runtime.prev_bg = bg;
         runtime.prev_frame_hash = frame_hash;
         runtime.has_prev_frame = true;
@@ -370,10 +381,7 @@ int run_with_sdl2(BuildUiFn&& build_ui, const AppOptions& options = {}) {
 
     SDL_StopTextInput();
     renderer.release_gl_resources();
-    if (runtime.cache_texture != 0u) {
-        glDeleteTextures(1, &runtime.cache_texture);
-        runtime.cache_texture = 0u;
-    }
+    detail::release_cache_texture(runtime);
     detail::modern_gl_set_proc_loader(nullptr);
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);

@@ -447,24 +447,36 @@ public:
           icon_font_path_(resolve_font_path(options.icon_font_file, options.icon_font_family, true)),
           enable_icon_fallback_(options.enable_icon_font_fallback) {}
 
+    void begin_frame(std::uint64_t frame_hash) const {
+        const std::uint64_t frame_token = frame_hash != 0ull ? frame_hash : (last_frame_hash_ + 1ull);
+        if (frame_token == last_frame_hash_) {
+            return;
+        }
+        last_frame_hash_ = frame_token;
+        frame_epoch_ += 1u;
+        if ((frame_epoch_ & 31u) == 0u) {
+            prune_idle_face_atlases();
+        }
+    }
+
     void release_gl_resources() const {
         for (auto& pair : faces_) {
-            FontFace& face = pair.second;
-            for (AtlasPage& page : face.atlas_pages) {
-                if (page.texture_id != 0u) {
-                    glDeleteTextures(1, &page.texture_id);
-                    page.texture_id = 0u;
-                }
-            }
-            face.atlas_pages.clear();
-            face.glyphs.clear();
-            face.data_blob.reset();
+            release_face_gl_resources(pair.second);
         }
         faces_.clear();
         font_blob_cache_.clear();
-        face_use_tick_ = 1u;
+        frame_epoch_ = 0u;
+        last_frame_hash_ = 0ull;
         modern_gl_trim_scratch(draw_glyphs_scratch_, 0u);
         modern_gl_trim_scratch(text_vertices_scratch_, 0u);
+        std::vector<unsigned char>{}.swap(atlas_zero_scratch_);
+        std::vector<unsigned char>{}.swap(glyph_bitmap_scratch_);
+        std::vector<unsigned char>{}.swap(glyph_upload_scratch_);
+        draw_glyphs_trim_frames_ = 0u;
+        text_vertices_trim_frames_ = 0u;
+        atlas_zero_trim_frames_ = 0u;
+        glyph_bitmap_trim_frames_ = 0u;
+        glyph_upload_trim_frames_ = 0u;
     }
 
     bool draw_text(const DrawCommand& cmd, std::string_view text) const {
@@ -496,9 +508,16 @@ public:
         float width = 0.0f;
         float max_above = 0.0f;
         float max_below = 0.0f;
+        std::size_t text_vertices_peak = 0u;
         auto finish = [&](bool ok) {
-            modern_gl_trim_scratch(text_vertices_scratch_, 4096u);
-            modern_gl_trim_scratch(draw_glyphs_scratch_, 512u);
+            const std::size_t draw_glyph_keep =
+                std::max<std::size_t>(512u, draw_glyphs.size() + draw_glyphs.size() / 2u + 16u);
+            const std::size_t text_vertices_keep =
+                std::max<std::size_t>(4096u, text_vertices_peak + text_vertices_peak / 2u + 32u);
+            eui::detail::context_retain_vector_hysteresis(text_vertices_scratch_, text_vertices_keep,
+                                                          text_vertices_trim_frames_, 120u);
+            eui::detail::context_retain_vector_hysteresis(draw_glyphs_scratch_, draw_glyph_keep,
+                                                          draw_glyphs_trim_frames_, 120u);
             return ok;
         };
 
@@ -599,6 +618,7 @@ public:
                 verts.clear();
                 return true;
             }
+            text_vertices_peak = std::max(text_vertices_peak, verts.size());
             const bool ok = modern_gl_draw_vertices_current_viewport(GL_TRIANGLES, verts.data(), verts.size(),
                                                                      bound_texture, ModernGlTextureMode::AlphaMask);
             verts.clear();
@@ -761,7 +781,7 @@ private:
         return data;
     }
 
-    static void release_face_gl_resources(FontFace& face) {
+    static void release_face_atlas_resources(FontFace& face) {
         for (AtlasPage& page : face.atlas_pages) {
             if (page.texture_id != 0u) {
                 glDeleteTextures(1, &page.texture_id);
@@ -770,7 +790,25 @@ private:
         }
         face.atlas_pages.clear();
         face.glyphs.clear();
+    }
+
+    static void release_face_gl_resources(FontFace& face) {
+        release_face_atlas_resources(face);
         face.data_blob.reset();
+    }
+
+    void prune_idle_face_atlases() const {
+        static constexpr std::uint64_t k_idle_face_release_frames = 180u;
+        for (auto& pair : faces_) {
+            FontFace& face = pair.second;
+            if (face.atlas_pages.empty()) {
+                continue;
+            }
+            const std::uint64_t age = frame_epoch_ - face.last_used;
+            if (age >= k_idle_face_release_frames) {
+                release_face_atlas_resources(face);
+            }
+        }
     }
 
     void prune_face_cache_if_needed(const std::string& preserve_key) const {
@@ -941,11 +979,15 @@ private:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        std::vector<unsigned char> zero(static_cast<std::size_t>(page.width * page.height), 0u);
+        auto& zero = atlas_zero_scratch_;
+        zero.assign(static_cast<std::size_t>(page.width * page.height), 0u);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, page.width, page.height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,
                      zero.data());
         glBindTexture(GL_TEXTURE_2D, 0);
         glPixelStorei(GL_UNPACK_ALIGNMENT, prev_unpack);
+        const std::size_t zero_keep =
+            std::max<std::size_t>(16u * 1024u, zero.size() + zero.size() / 4u + 64u);
+        eui::detail::context_retain_vector_hysteresis(atlas_zero_scratch_, zero_keep, atlas_zero_trim_frames_, 120u);
 
         face->atlas_pages.push_back(std::move(page));
         return true;
@@ -1045,7 +1087,7 @@ private:
         const std::string key = std::string(icon_font ? "icon:" : "text:") + std::to_string(quantized_px);
         auto it = faces_.find(key);
         if (it != faces_.end()) {
-            it->second.last_used = ++face_use_tick_;
+            it->second.last_used = frame_epoch_;
             return it->second.valid ? &it->second : nullptr;
         }
 
@@ -1076,7 +1118,7 @@ private:
                     face.max_pages = k_max_atlas_pages;
                 }
                 face.lru_tick = 1u;
-                face.last_used = ++face_use_tick_;
+                face.last_used = frame_epoch_;
                 face.valid = face.scale > 0.0f;
             }
         }
@@ -1122,7 +1164,8 @@ private:
         glyph.valid = true;
 
         if (w > 0 && h > 0) {
-            std::vector<unsigned char> bitmap(static_cast<std::size_t>(w * h), 0u);
+            auto& bitmap = glyph_bitmap_scratch_;
+            bitmap.assign(static_cast<std::size_t>(w * h), 0u);
             stbtt_MakeCodepointBitmap(&face->info, bitmap.data(), w, h, w, face->scale, face->scale,
                                       static_cast<int>(cp));
 
@@ -1139,8 +1182,8 @@ private:
                 const SlotHandle slot = acquire_slot(face, cp);
                 if (slot.valid && slot.page != nullptr && slot.page->texture_id != 0u) {
                     const unsigned char* upload_data = bitmap.data();
-                    std::vector<unsigned char> padded_bitmap{};
                     if (pad > 0) {
+                        auto& padded_bitmap = glyph_upload_scratch_;
                         padded_bitmap.assign(static_cast<std::size_t>(upload_w * upload_h), 0u);
                         for (int row = 0; row < h; ++row) {
                             std::memcpy(&padded_bitmap[static_cast<std::size_t>((row + pad) * upload_w + pad)],
@@ -1175,6 +1218,18 @@ private:
                     glyph.has_bitmap = true;
                 }
             }
+            const std::size_t bitmap_keep =
+                std::max<std::size_t>(4u * 1024u, bitmap.size() + bitmap.size() / 4u + 32u);
+            eui::detail::context_retain_vector_hysteresis(glyph_bitmap_scratch_, bitmap_keep,
+                                                          glyph_bitmap_trim_frames_, 120u);
+            const std::size_t upload_bytes =
+                pad > 0 ? static_cast<std::size_t>(std::max(0, upload_w)) *
+                              static_cast<std::size_t>(std::max(0, upload_h))
+                        : 0u;
+            const std::size_t upload_keep =
+                upload_bytes == 0u ? 0u : std::max<std::size_t>(4u * 1024u, upload_bytes + upload_bytes / 4u + 32u);
+            eui::detail::context_retain_vector_hysteresis(glyph_upload_scratch_, upload_keep,
+                                                          glyph_upload_trim_frames_, 120u);
         }
 
         auto [inserted, _] = face->glyphs.emplace(cp, std::move(glyph));
@@ -1186,9 +1241,18 @@ private:
     bool enable_icon_fallback_{true};
     mutable std::unordered_map<std::string, FontFace> faces_{};
     mutable std::unordered_map<std::string, std::shared_ptr<std::vector<unsigned char>>> font_blob_cache_{};
-    mutable std::uint64_t face_use_tick_{1u};
+    mutable std::uint64_t frame_epoch_{0u};
+    mutable std::uint64_t last_frame_hash_{0ull};
     mutable std::vector<PreparedGlyph> draw_glyphs_scratch_{};
     mutable std::vector<ModernGlVertex> text_vertices_scratch_{};
+    mutable std::vector<unsigned char> atlas_zero_scratch_{};
+    mutable std::vector<unsigned char> glyph_bitmap_scratch_{};
+    mutable std::vector<unsigned char> glyph_upload_scratch_{};
+    mutable std::uint32_t draw_glyphs_trim_frames_{0u};
+    mutable std::uint32_t text_vertices_trim_frames_{0u};
+    mutable std::uint32_t atlas_zero_trim_frames_{0u};
+    mutable std::uint32_t glyph_bitmap_trim_frames_{0u};
+    mutable std::uint32_t glyph_upload_trim_frames_{0u};
 };
 #else
 class StbFontRenderer {
@@ -1197,6 +1261,7 @@ public:
         return {};
     }
     explicit StbFontRenderer(const AppOptions&) {}
+    void begin_frame(std::uint64_t) const {}
     void release_gl_resources() const {}
     bool draw_text(const DrawCommand&, std::string_view) const {
         return false;

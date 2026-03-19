@@ -4,7 +4,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <string_view>
+#include <vector>
 
 #include "eui/core/foundation.h"
 
@@ -113,8 +115,7 @@ inline std::uint64_t context_hash_command_base(const DrawCommand& cmd) {
     hash = context_hash_mix(hash, static_cast<std::uint64_t>(cmd.type));
     hash = context_hash_mix(hash, context_hash_rect(cmd.rect));
     hash = context_hash_mix(hash, context_hash_color(cmd.color));
-    hash = context_hash_mix(hash, context_hash_brush(cmd.brush));
-    hash = context_hash_mix(hash, context_hash_transform_3d(cmd.transform_3d));
+    hash = context_hash_mix(hash, cmd.payload_hash);
     hash = context_hash_mix(hash, static_cast<std::uint64_t>(context_float_bits(cmd.font_size)));
     hash = context_hash_mix(hash, static_cast<std::uint64_t>(cmd.align));
     hash = context_hash_mix(hash, static_cast<std::uint64_t>(context_float_bits(cmd.radius)));
@@ -127,6 +128,68 @@ inline std::uint64_t context_hash_command_base(const DrawCommand& cmd) {
         hash = context_hash_mix(hash, context_hash_rect(cmd.clip_rect));
     }
     return hash;
+}
+
+template <typename T>
+inline void context_retain_vector_hysteresis(std::vector<T>& storage, std::size_t desired_capacity,
+                                             std::uint32_t& underuse_counter,
+                                             std::uint32_t trigger_frames = 90u) {
+    storage.clear();
+    if (storage.capacity() < desired_capacity) {
+        storage.reserve(desired_capacity);
+        underuse_counter = 0u;
+        return;
+    }
+
+    const bool oversized =
+        desired_capacity == 0u ? storage.capacity() > 0u : storage.capacity() > desired_capacity * 2u;
+    if (!oversized) {
+        underuse_counter = 0u;
+        return;
+    }
+
+    underuse_counter += 1u;
+    if (underuse_counter < trigger_frames) {
+        return;
+    }
+
+    std::vector<T> trimmed{};
+    if (desired_capacity > 0u) {
+        trimmed.reserve(desired_capacity);
+    }
+    storage.swap(trimmed);
+    underuse_counter = 0u;
+}
+
+template <typename T>
+inline void context_trim_live_vector_hysteresis(std::vector<T>& storage, std::size_t desired_capacity,
+                                                std::uint32_t& underuse_counter,
+                                                std::uint32_t trigger_frames = 90u) {
+    if (storage.capacity() < desired_capacity) {
+        storage.reserve(desired_capacity);
+        underuse_counter = 0u;
+        return;
+    }
+
+    const std::size_t min_capacity = std::max(desired_capacity, storage.size());
+    const bool oversized = min_capacity == 0u ? storage.capacity() > 0u : storage.capacity() > min_capacity * 2u;
+    if (!oversized) {
+        underuse_counter = 0u;
+        return;
+    }
+
+    underuse_counter += 1u;
+    if (underuse_counter < trigger_frames) {
+        return;
+    }
+
+    std::vector<T> trimmed{};
+    if (min_capacity > 0u) {
+        trimmed.reserve(min_capacity);
+    }
+    trimmed.insert(trimmed.end(), std::make_move_iterator(storage.begin()), std::make_move_iterator(storage.end()));
+    storage.swap(trimmed);
+    underuse_counter = 0u;
 }
 
 inline bool context_intersect_rects(const Rect& lhs, const Rect& rhs, Rect& out) {

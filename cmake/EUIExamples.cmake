@@ -162,6 +162,25 @@ function(eui_find_glfw_target out_target allow_fetch)
         set(glfw_target glfw3)
     endif()
 
+    if(NOT glfw_target AND EXISTS "${CMAKE_BINARY_DIR}/_deps/glfw-src/CMakeLists.txt")
+        message(STATUS "GLFW not found via find_package. Reusing cached source from build/_deps/glfw-src.")
+
+        set(GLFW_BUILD_DOCS OFF CACHE BOOL "Disable GLFW docs" FORCE)
+        set(GLFW_BUILD_TESTS OFF CACHE BOOL "Disable GLFW tests" FORCE)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Disable GLFW examples" FORCE)
+        set(GLFW_INSTALL OFF CACHE BOOL "Disable GLFW install target" FORCE)
+
+        add_subdirectory("${CMAKE_BINARY_DIR}/_deps/glfw-src" "${CMAKE_BINARY_DIR}/_deps/glfw-build")
+
+        if(TARGET glfw)
+            set(glfw_target glfw)
+        elseif(TARGET glfw3::glfw)
+            set(glfw_target glfw3::glfw)
+        elseif(TARGET glfw3)
+            set(glfw_target glfw3)
+        endif()
+    endif()
+
     if(NOT glfw_target AND allow_fetch AND EUI_FETCH_GLFW_FROM_GIT)
         eui_can_fetch_git_repository("https://github.com/glfw/glfw.git" glfw_can_fetch)
         if(glfw_can_fetch)
@@ -171,6 +190,8 @@ function(eui_find_glfw_target out_target allow_fetch)
             set(GLFW_BUILD_TESTS OFF CACHE BOOL "Disable GLFW tests" FORCE)
             set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Disable GLFW examples" FORCE)
             set(GLFW_INSTALL OFF CACHE BOOL "Disable GLFW install target" FORCE)
+            set(FETCHCONTENT_UPDATES_DISCONNECTED_GLFW ON CACHE BOOL
+                "Skip GLFW git update when the source tree is already populated" FORCE)
 
             FetchContent_Declare(
                 glfw
@@ -215,6 +236,27 @@ function(eui_find_sdl2_target out_target out_include_dirs allow_fetch)
         endif()
     endif()
 
+    if(NOT sdl2_target AND EXISTS "${CMAKE_BINARY_DIR}/_deps/sdl2-src/CMakeLists.txt")
+        message(STATUS "SDL2 not found via find_package. Reusing cached source from build/_deps/sdl2-src.")
+
+        set(SDL_SHARED OFF CACHE BOOL "Disable shared SDL2 target" FORCE)
+        set(SDL_STATIC ON CACHE BOOL "Enable static SDL2 target" FORCE)
+        set(SDL_TEST_LIBRARY OFF CACHE BOOL "Disable SDL2 test library" FORCE)
+        set(SDL_TESTS OFF CACHE BOOL "Disable SDL2 tests" FORCE)
+
+        add_subdirectory("${CMAKE_BINARY_DIR}/_deps/sdl2-src" "${CMAKE_BINARY_DIR}/_deps/sdl2-build")
+
+        if(TARGET SDL2::SDL2)
+            set(sdl2_target SDL2::SDL2)
+        elseif(TARGET SDL2::SDL2-static)
+            set(sdl2_target SDL2::SDL2-static)
+        elseif(TARGET SDL2-static)
+            set(sdl2_target SDL2-static)
+        elseif(TARGET SDL2)
+            set(sdl2_target SDL2)
+        endif()
+    endif()
+
     if(NOT sdl2_target AND allow_fetch AND EUI_FETCH_SDL2_FROM_GIT)
         eui_can_fetch_git_repository("https://github.com/libsdl-org/SDL.git" sdl2_can_fetch)
         if(sdl2_can_fetch)
@@ -224,6 +266,8 @@ function(eui_find_sdl2_target out_target out_include_dirs allow_fetch)
             set(SDL_STATIC ON CACHE BOOL "Enable static SDL2 target" FORCE)
             set(SDL_TEST_LIBRARY OFF CACHE BOOL "Disable SDL2 test library" FORCE)
             set(SDL_TESTS OFF CACHE BOOL "Disable SDL2 tests" FORCE)
+            set(FETCHCONTENT_UPDATES_DISCONNECTED_SDL2 ON CACHE BOOL
+                "Skip SDL2 git update when the source tree is already populated" FORCE)
 
             FetchContent_Declare(
                 sdl2

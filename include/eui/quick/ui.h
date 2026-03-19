@@ -566,6 +566,58 @@ public:
         return eui::animation::animate_scalar(clip, elapsed_seconds);
     }
 
+    std::uint64_t id(std::string_view label) const {
+        return ctx_.motion_key(label);
+    }
+
+    std::uint64_t id(std::string_view label, std::uint64_t salt) const {
+        return ctx_.motion_key(label, salt);
+    }
+
+    std::uint64_t id(std::uint64_t base, std::uint64_t salt) const {
+        return ctx_.motion_key(base, salt);
+    }
+
+    float motion(std::uint64_t id, float target, float speed = 10.0f) {
+        return ctx_.motion(id, target, speed);
+    }
+
+    float motion(std::uint64_t id, float target, float rise_speed, float fall_speed) {
+        return ctx_.motion(id, target, rise_speed, fall_speed);
+    }
+
+    float motion(std::string_view label, float target, float speed = 10.0f) {
+        return ctx_.motion(id(label), target, speed);
+    }
+
+    float motion(std::string_view label, float target, float rise_speed, float fall_speed) {
+        return ctx_.motion(id(label), target, rise_speed, fall_speed);
+    }
+
+    float presence(std::uint64_t id, bool visible, float enter_speed = 12.0f, float exit_speed = 16.0f) {
+        return ctx_.presence(id, visible, enter_speed, exit_speed);
+    }
+
+    float presence(std::string_view label, bool visible, float enter_speed = 12.0f, float exit_speed = 16.0f) {
+        return ctx_.presence(id(label), visible, enter_speed, exit_speed);
+    }
+
+    void reset_motion(std::uint64_t id, float value = 0.0f) {
+        ctx_.reset_motion(id, value);
+    }
+
+    void reset_motion(std::string_view label, float value = 0.0f) {
+        ctx_.reset_motion(id(label), value);
+    }
+
+    float motion_value(std::uint64_t id, float fallback = 0.0f) const {
+        return ctx_.motion_value(id, fallback);
+    }
+
+    float motion_value(std::string_view label, float fallback = 0.0f) const {
+        return ctx_.motion_value(id(label), fallback);
+    }
+
     RegionScope scope(const Rect& rect);
     template <typename Fn>
     void scope(const Rect& rect, Fn&& fn);

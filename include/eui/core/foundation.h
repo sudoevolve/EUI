@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 #include "eui/graphics.h"
@@ -411,12 +412,15 @@ enum class TextAlign {
 };
 
 struct DrawCommand {
+    static constexpr std::uint32_t k_invalid_payload_index = std::numeric_limits<std::uint32_t>::max();
     CommandType type{CommandType::FilledRect};
     Rect rect{};
     Rect clip_rect{};
+    Rect visible_rect{};
     Color color{};
-    eui::graphics::Brush brush{};
-    eui::graphics::Transform3D transform_3d{};
+    std::uint64_t payload_hash{0ull};
+    std::uint32_t brush_payload_index{k_invalid_payload_index};
+    std::uint32_t transform_payload_index{k_invalid_payload_index};
     std::uint32_t text_offset{0};
     std::uint32_t text_length{0};
     float font_size{13.0f};

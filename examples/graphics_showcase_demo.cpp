@@ -23,8 +23,6 @@ struct GraphicsDemoState {
     float shadow_opacity{0.30f};
     float shadow_spread{8.0f};
 
-    float tilt_x{0.0f};
-    float tilt_y{0.0f};
     float tilt_depth{16.0f};
     float tilt_limit_x{18.0f};
     float tilt_limit_y{14.0f};
@@ -34,10 +32,6 @@ struct GraphicsDemoState {
 
 float clamp01(float value) {
     return std::clamp(value, 0.0f, 1.0f);
-}
-
-void approach(float& value, float target, float speed, float dt) {
-    value += (target - value) * std::clamp(dt * speed, 0.0f, 1.0f);
 }
 
 Rect inset_rect(const Rect& rect, float padding) {
@@ -268,7 +262,7 @@ void draw_shadow_demo(UI& ui, GraphicsDemoState& state, const Rect& rect, float 
         });
 }
 
-void draw_transform_demo(UI& ui, GraphicsDemoState& state, const Rect& rect, float scale, float dt) {
+void draw_transform_demo(UI& ui, GraphicsDemoState& state, const Rect& rect, float scale) {
     const auto dp = [scale](float value) { return value * scale; };
     const auto& input = ui.ctx().input_state();
 
@@ -291,10 +285,12 @@ void draw_transform_demo(UI& ui, GraphicsDemoState& state, const Rect& rect, flo
                 hovered ? clamp01((input.mouse_y - interactive.y) / std::max(1.0f, interactive.h)) : 0.5f;
             const float target_tilt_x = hovered ? (local_u - 0.5f) * display_x_limit * 2.0f : 0.0f;
             const float target_tilt_y = hovered ? (0.5f - local_v) * display_y_limit * 2.0f : 0.0f;
-            approach(state.tilt_x, target_tilt_x, hovered ? state.tilt_smooth : state.tilt_smooth * 0.7f, dt);
-            approach(state.tilt_y, target_tilt_y, hovered ? state.tilt_smooth : state.tilt_smooth * 0.7f, dt);
-            const float card_rotate_x = -state.tilt_y;
-            const float card_rotate_y = -state.tilt_x;
+            const float tilt_x =
+                ui.motion("graphics-demo/tilt-x", target_tilt_x, hovered ? state.tilt_smooth : state.tilt_smooth * 0.7f);
+            const float tilt_y =
+                ui.motion("graphics-demo/tilt-y", target_tilt_y, hovered ? state.tilt_smooth : state.tilt_smooth * 0.7f);
+            const float card_rotate_x = -tilt_y;
+            const float card_rotate_y = -tilt_x;
 
             ui.shape()
                 .in(stage)
@@ -432,7 +428,7 @@ int main() {
 
                     draw_blur_demo(ui, state, first.first, scale);
                     draw_shadow_demo(ui, state, second.first, scale);
-                    draw_transform_demo(ui, state, second.second, scale, frame.delta_seconds_f32());
+                    draw_transform_demo(ui, state, second.second, scale);
                 });
         },
         options);

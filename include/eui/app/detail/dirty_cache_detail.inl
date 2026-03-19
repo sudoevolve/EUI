@@ -41,24 +41,43 @@ inline Rect rect_union(const Rect& lhs, const Rect& rhs) {
     return Rect{x1, y1, std::max(0.0f, x2 - x1), std::max(0.0f, y2 - y1)};
 }
 
-inline bool command_payload_equal(const DrawCommand& lhs, const DrawCommand& rhs,
-                                  const std::vector<char>& lhs_arena,
-                                  const std::vector<char>& rhs_arena) {
-    (void)lhs_arena;
-    (void)rhs_arena;
+inline bool command_payload_equal(const DrawCommand& lhs, const DrawCommand& rhs) {
+    return lhs.hash == rhs.hash;
+}
+
+inline bool command_payload_equal(const DrawCommand& lhs, const CachedDrawCommand& rhs) {
     return lhs.hash == rhs.hash;
 }
 
 inline Rect command_visible_rect(const DrawCommand& cmd) {
-    Rect bounds = projected_rect_bounds(cmd.rect, cmd.transform_3d);
-    if (!cmd.has_clip) {
-        return bounds;
+    return cmd.visible_rect;
+}
+
+inline Rect command_visible_rect(const CachedDrawCommand& cmd) {
+    return cmd.visible_rect;
+}
+
+inline void update_prev_command_cache(RuntimeState& runtime, const std::vector<DrawCommand>& commands) {
+    runtime.prev_commands.clear();
+    runtime.prev_commands.reserve(commands.size());
+    for (const DrawCommand& cmd : commands) {
+        runtime.prev_commands.push_back(CachedDrawCommand{
+            cmd.visible_rect,
+            cmd.hash,
+        });
     }
-    Rect visible{};
-    if (!rect_intersection(bounds, cmd.clip_rect, visible)) {
-        return Rect{};
-    }
-    return visible;
+
+    const std::size_t desired_prev_cap =
+        std::max<std::size_t>(256u, runtime.prev_commands.size() + runtime.prev_commands.size() / 2u + 16u);
+    eui::detail::context_trim_live_vector_hysteresis(runtime.prev_commands, desired_prev_cap,
+                                                     runtime.prev_commands_trim_frames, 180u);
+}
+
+inline void trim_dirty_region_cache(RuntimeState& runtime) {
+    const std::size_t desired_dirty_cap =
+        std::max<std::size_t>(16u, runtime.dirty_regions.size() + runtime.dirty_regions.size() / 2u + 4u);
+    eui::detail::context_retain_vector_hysteresis(runtime.dirty_regions, desired_dirty_cap,
+                                                  runtime.dirty_regions_trim_frames, 180u);
 }
 
 inline Rect expanded_and_clamped(const Rect& rect, int width, int height, float expand_px = 2.0f) {
@@ -150,11 +169,9 @@ inline void merge_dirty_overlaps(std::vector<Rect>& regions, int width, int heig
     }
 }
 
-inline bool compute_dirty_regions(const std::vector<DrawCommand>& commands,
-                                  const std::vector<char>& text_arena, const RuntimeState& runtime,
+inline bool compute_dirty_regions(const std::vector<DrawCommand>& commands, const RuntimeState& runtime,
                                   const Color& bg, int width, int height, bool force_full,
                                   std::vector<Rect>& out_regions) {
-    (void)text_arena;
     out_regions.clear();
     if (force_full || !runtime.has_prev_frame || !color_eq(bg, runtime.prev_bg)) {
         out_regions.push_back(Rect{0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)});
@@ -166,8 +183,7 @@ inline bool compute_dirty_regions(const std::vector<DrawCommand>& commands,
         const bool has_curr = i < commands.size();
         const bool has_prev = i < runtime.prev_commands.size();
 
-        if (has_curr && has_prev &&
-            command_payload_equal(commands[i], runtime.prev_commands[i], text_arena, runtime.prev_text_arena)) {
+        if (has_curr && has_prev && command_payload_equal(commands[i], runtime.prev_commands[i])) {
             continue;
         }
 
@@ -230,15 +246,27 @@ inline IRect to_gl_rect(const Rect& rect, int framebuffer_w, int framebuffer_h) 
     return IRect{x, y, w, h};
 }
 
+inline void release_cache_texture(RuntimeState& runtime) {
+    if (runtime.cache_texture != 0u) {
+        glDeleteTextures(1, &runtime.cache_texture);
+        runtime.cache_texture = 0u;
+    }
+    runtime.cache_w = 0;
+    runtime.cache_h = 0;
+    runtime.cache_inactive_frames = 0u;
+    runtime.has_cache = false;
+}
+
 inline void ensure_cache_texture(RuntimeState& runtime, int width, int height) {
     if (runtime.cache_texture == 0u) {
         glGenTextures(1, &runtime.cache_texture);
     }
-    if (runtime.cache_w == width && runtime.cache_h == height && runtime.has_cache) {
+    if (runtime.cache_w == width && runtime.cache_h == height) {
         return;
     }
     runtime.cache_w = width;
     runtime.cache_h = height;
+    runtime.cache_inactive_frames = 0u;
     runtime.has_cache = false;
 
     glBindTexture(GL_TEXTURE_2D, runtime.cache_texture);
@@ -255,6 +283,7 @@ inline void copy_full_to_cache(RuntimeState& runtime, int width, int height) {
     }
     glBindTexture(GL_TEXTURE_2D, runtime.cache_texture);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+    runtime.cache_inactive_frames = 0u;
     runtime.has_cache = true;
 }
 
@@ -264,6 +293,7 @@ inline void copy_region_to_cache(RuntimeState& runtime, const IRect& gl_rect) {
     }
     glBindTexture(GL_TEXTURE_2D, runtime.cache_texture);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, gl_rect.x, gl_rect.y, gl_rect.x, gl_rect.y, gl_rect.w, gl_rect.h);
+    runtime.cache_inactive_frames = 0u;
     runtime.has_cache = true;
 }
 
@@ -287,4 +317,20 @@ inline void draw_cache_texture(const RuntimeState& runtime, int width, int heigh
     };
     modern_gl_draw_vertices(GL_TRIANGLES, verts.data(), verts.size(), width, height, runtime.cache_texture,
                             ModernGlTextureMode::Rgba);
+}
+
+inline void update_cache_lifecycle(RuntimeState& runtime) {
+    if (runtime.has_cache) {
+        runtime.cache_inactive_frames = 0u;
+        return;
+    }
+    if (runtime.cache_texture == 0u) {
+        runtime.cache_inactive_frames = 0u;
+        return;
+    }
+
+    runtime.cache_inactive_frames += 1u;
+    if (runtime.cache_inactive_frames >= 180u) {
+        release_cache_texture(runtime);
+    }
 }

@@ -36,13 +36,33 @@ public:
             backdrop_texture_w_ = 0;
             backdrop_texture_h_ = 0;
         }
+        std::vector<std::uint32_t>{}.swap(spatial_bucket_offsets_);
+        std::vector<std::uint32_t>{}.swap(spatial_bucket_cursor_);
+        std::vector<std::uint32_t>{}.swap(spatial_bucket_indices_);
+        std::vector<std::uint16_t>{}.swap(spatial_marks_);
+        std::vector<std::uint32_t>{}.swap(visible_indices_);
+        spatial_commands_ptr_ = nullptr;
+        spatial_command_count_ = 0u;
+        spatial_frame_hash_ = 0ull;
+        spatial_width_ = 0;
+        spatial_height_ = 0;
+        spatial_cols_ = 0;
+        spatial_rows_ = 0;
+        filled_batch_trim_frames_ = 0u;
+        outline_batch_trim_frames_ = 0u;
+        blur_batch_trim_frames_ = 0u;
+        backdrop_frame_token_ = 0ull;
+        backdrop_idle_frames_ = 0u;
+        backdrop_used_in_frame_ = false;
         modern_gl_trim_scratch(filled_batch_scratch_, 0u);
         modern_gl_trim_scratch(outline_batch_scratch_, 0u);
         modern_gl_trim_scratch(blur_pass_vertices_scratch_, 0u);
     }
 
-    void render(const std::vector<DrawCommand>& commands, const std::vector<char>& text_arena, int width,
-                int height, const Rect* clip_rect = nullptr) const {
+    void render(const std::vector<DrawCommand>& commands, const std::vector<char>& text_arena,
+                const std::vector<eui::graphics::Brush>& brush_payloads,
+                const std::vector<eui::graphics::Transform3D>& transform_payloads, int width, int height,
+                const Rect* clip_rect = nullptr, std::uint64_t frame_hash = 0ull) const {
         glViewport(0, 0, width, height);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
@@ -55,6 +75,10 @@ public:
         if (!outer_clip_valid) {
             return;
         }
+        if (stb_font_renderer_ != nullptr) {
+            stb_font_renderer_->begin_frame(frame_hash);
+        }
+        begin_backdrop_frame(frame_hash);
 
         auto irect_equal = [](const IRect& lhs, const IRect& rhs) {
             return lhs.x == rhs.x && lhs.y == rhs.y && lhs.w == rhs.w && lhs.h == rhs.h;
@@ -96,67 +120,48 @@ public:
             for (std::size_t i = 0; i < commands.size(); ++i) {
                 const Rect visible_rect = command_visible_rect(commands[i]);
                 if (clip_rect == nullptr || rect_intersects(visible_rect, *clip_rect)) {
-                    visible_indices_.push_back(i);
+                    visible_indices_.push_back(static_cast<std::uint32_t>(i));
                 }
             }
         } else {
-            const int tile_px = 128;
-            const int cols = std::max(1, (width + tile_px - 1) / tile_px);
-            const int rows = std::max(1, (height + tile_px - 1) / tile_px);
-            const std::size_t bucket_count = static_cast<std::size_t>(cols * rows);
-            if (spatial_buckets_.size() != bucket_count) {
-                spatial_buckets_.assign(bucket_count, std::vector<std::uint32_t>{});
-            } else {
-                for (std::vector<std::uint32_t>& bucket : spatial_buckets_) {
-                    bucket.clear();
-                }
-            }
-
-            for (std::size_t i = 0; i < commands.size(); ++i) {
-                const Rect rect = command_visible_rect(commands[i]);
-                if (rect.w <= 0.0f || rect.h <= 0.0f || !rect_intersects(rect, *clip_rect)) {
-                    continue;
-                }
-
-                const int x0 = std::clamp(static_cast<int>(std::floor(rect.x / tile_px)), 0, cols - 1);
-                const int y0 = std::clamp(static_cast<int>(std::floor(rect.y / tile_px)), 0, rows - 1);
-                const int x1 = std::clamp(static_cast<int>(std::floor((rect.x + rect.w) / tile_px)), 0, cols - 1);
-                const int y1 = std::clamp(static_cast<int>(std::floor((rect.y + rect.h) / tile_px)), 0, rows - 1);
-                for (int y = y0; y <= y1; ++y) {
-                    for (int x = x0; x <= x1; ++x) {
-                        spatial_buckets_[static_cast<std::size_t>(y * cols + x)].push_back(
-                            static_cast<std::uint32_t>(i));
-                    }
-                }
-            }
+            ensure_spatial_index(commands, width, height, frame_hash);
 
             if (spatial_marks_.size() < commands.size()) {
-                spatial_marks_.assign(commands.size(), 0u);
+                spatial_marks_.assign(commands.size(), static_cast<std::uint16_t>(0));
                 spatial_mark_id_ = 1u;
             }
-            spatial_mark_id_ += 1u;
+            spatial_mark_id_ = static_cast<std::uint16_t>(spatial_mark_id_ + 1u);
             if (spatial_mark_id_ == 0u) {
-                std::fill(spatial_marks_.begin(), spatial_marks_.end(), 0u);
+                std::fill(spatial_marks_.begin(), spatial_marks_.end(), static_cast<std::uint16_t>(0));
                 spatial_mark_id_ = 1u;
             }
 
             visible_indices_.reserve(commands.size() / 4u + 8u);
-            const int clip_x0 = std::clamp(static_cast<int>(std::floor(clip_rect->x / tile_px)), 0, cols - 1);
-            const int clip_y0 = std::clamp(static_cast<int>(std::floor(clip_rect->y / tile_px)), 0, rows - 1);
+            const int clip_x0 = std::clamp(static_cast<int>(std::floor(clip_rect->x / k_spatial_tile_px)), 0,
+                                           spatial_cols_ - 1);
+            const int clip_y0 = std::clamp(static_cast<int>(std::floor(clip_rect->y / k_spatial_tile_px)), 0,
+                                           spatial_rows_ - 1);
             const int clip_x1 =
-                std::clamp(static_cast<int>(std::floor((clip_rect->x + clip_rect->w) / tile_px)), 0, cols - 1);
+                std::clamp(static_cast<int>(std::floor((clip_rect->x + clip_rect->w) / k_spatial_tile_px)), 0,
+                           spatial_cols_ - 1);
             const int clip_y1 =
-                std::clamp(static_cast<int>(std::floor((clip_rect->y + clip_rect->h) / tile_px)), 0, rows - 1);
+                std::clamp(static_cast<int>(std::floor((clip_rect->y + clip_rect->h) / k_spatial_tile_px)), 0,
+                           spatial_rows_ - 1);
             for (int y = clip_y0; y <= clip_y1; ++y) {
                 for (int x = clip_x0; x <= clip_x1; ++x) {
-                    const std::vector<std::uint32_t>& bucket =
-                        spatial_buckets_[static_cast<std::size_t>(y * cols + x)];
-                    for (std::uint32_t idx : bucket) {
+                    const std::size_t bucket_index = static_cast<std::size_t>(y * spatial_cols_ + x);
+                    const std::uint32_t begin = spatial_bucket_offsets_[bucket_index];
+                    const std::uint32_t end = spatial_bucket_offsets_[bucket_index + 1u];
+                    for (std::uint32_t bucket_pos = begin; bucket_pos < end; ++bucket_pos) {
+                        const std::uint32_t idx = spatial_bucket_indices_[bucket_pos];
                         if (spatial_marks_[idx] == spatial_mark_id_) {
                             continue;
                         }
+                        if (!rect_intersects(command_visible_rect(commands[static_cast<std::size_t>(idx)]), *clip_rect)) {
+                            continue;
+                        }
                         spatial_marks_[idx] = spatial_mark_id_;
-                        visible_indices_.push_back(static_cast<std::size_t>(idx));
+                        visible_indices_.push_back(idx);
                     }
                 }
             }
@@ -177,6 +182,9 @@ public:
         auto& outline_batch = outline_batch_scratch_;
         modern_gl_prepare_scratch(filled_batch, 1024u);
         modern_gl_prepare_scratch(outline_batch, 1024u);
+        std::size_t filled_batch_peak = 0u;
+        std::size_t outline_batch_peak = 0u;
+        std::size_t blur_pass_peak = 0u;
 
         auto push_colored_vertex = [](std::vector<ModernGlVertex>& batch, float x, float y, const Color& color) {
             batch.push_back(modern_gl_vertex(x, y, color));
@@ -200,31 +208,49 @@ public:
             return to_legacy_color(stops[stop_count - 1u].color);
         };
 
+        auto resolve_brush = [&](const DrawCommand& cmd) -> const eui::graphics::Brush* {
+            if (cmd.brush_payload_index == DrawCommand::k_invalid_payload_index ||
+                static_cast<std::size_t>(cmd.brush_payload_index) >= brush_payloads.size()) {
+                return nullptr;
+            }
+            return &brush_payloads[cmd.brush_payload_index];
+        };
+
+        auto resolve_transform = [&](const DrawCommand& cmd) -> const eui::graphics::Transform3D& {
+            static const eui::graphics::Transform3D identity{};
+            if (cmd.transform_payload_index == DrawCommand::k_invalid_payload_index ||
+                static_cast<std::size_t>(cmd.transform_payload_index) >= transform_payloads.size()) {
+                return identity;
+            }
+            return transform_payloads[cmd.transform_payload_index];
+        };
+
         auto sample_brush = [&](const DrawCommand& cmd, float x, float y) -> Color {
-            const eui::graphics::Brush& brush = cmd.brush;
-            if (brush.kind == eui::graphics::BrushKind::none) {
+            const eui::graphics::Brush* brush = resolve_brush(cmd);
+            if (brush == nullptr || brush->kind == eui::graphics::BrushKind::none) {
                 return cmd.color;
             }
             const float u = cmd.rect.w > 1e-6f ? std::clamp((x - cmd.rect.x) / cmd.rect.w, 0.0f, 1.0f) : 0.0f;
             const float v = cmd.rect.h > 1e-6f ? std::clamp((y - cmd.rect.y) / cmd.rect.h, 0.0f, 1.0f) : 0.0f;
-            switch (brush.kind) {
+            switch (brush->kind) {
                 case eui::graphics::BrushKind::solid:
-                    return to_legacy_color(brush.solid);
+                    return to_legacy_color(brush->solid);
                 case eui::graphics::BrushKind::linear_gradient: {
-                    const float dx = brush.linear.end.x - brush.linear.start.x;
-                    const float dy = brush.linear.end.y - brush.linear.start.y;
+                    const float dx = brush->linear.end.x - brush->linear.start.x;
+                    const float dy = brush->linear.end.y - brush->linear.start.y;
                     const float denom = dx * dx + dy * dy;
                     const float t =
-                        denom > 1e-6f ? (((u - brush.linear.start.x) * dx + (v - brush.linear.start.y) * dy) / denom)
+                        denom > 1e-6f
+                            ? (((u - brush->linear.start.x) * dx + (v - brush->linear.start.y) * dy) / denom)
                                       : 0.0f;
-                    return sample_stops(brush.linear.stops, brush.linear.stop_count, t);
+                    return sample_stops(brush->linear.stops, brush->linear.stop_count, t);
                 }
                 case eui::graphics::BrushKind::radial_gradient: {
-                    const float radius = std::max(1e-6f, brush.radial.radius);
-                    const float dx = u - brush.radial.center.x;
-                    const float dy = v - brush.radial.center.y;
+                    const float radius = std::max(1e-6f, brush->radial.radius);
+                    const float dx = u - brush->radial.center.x;
+                    const float dy = v - brush->radial.center.y;
                     const float t = std::sqrt(dx * dx + dy * dy) / radius;
-                    return sample_stops(brush.radial.stops, brush.radial.stop_count, t);
+                    return sample_stops(brush->radial.stops, brush->radial.stop_count, t);
                 }
                 case eui::graphics::BrushKind::none:
                 default:
@@ -233,7 +259,7 @@ public:
         };
 
         auto project_vertex = [&](const DrawCommand& cmd, float x, float y) -> Point {
-            const ProjectedPoint projected = project_rect_point_3d(x, y, cmd.rect, cmd.transform_3d);
+            const ProjectedPoint projected = project_rect_point_3d(x, y, cmd.rect, resolve_transform(cmd));
             return Point{projected.x, projected.y};
         };
 
@@ -257,7 +283,7 @@ public:
         };
 
         auto draw_backdrop_blur = [&](const DrawCommand& cmd) {
-            Rect bounds = projected_rect_bounds(cmd.rect, cmd.transform_3d);
+            Rect bounds = projected_rect_bounds(cmd.rect, resolve_transform(cmd));
             if (cmd.has_clip) {
                 Rect clipped{};
                 if (!rect_intersection(bounds, cmd.clip_rect, clipped)) {
@@ -280,6 +306,7 @@ public:
                 return;
             }
 
+            backdrop_used_in_frame_ = true;
             ensure_backdrop_texture(src_w, src_h);
             glBindTexture(GL_TEXTURE_2D, backdrop_texture_);
             glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, src_x, height - src_bottom, src_w, src_h);
@@ -341,6 +368,7 @@ public:
                     emit_tex_vertex(pass_vertices, polygon[static_cast<std::size_t>(next)], pass_color);
                 }
             }
+            blur_pass_peak = std::max(blur_pass_peak, pass_vertices.size());
 
             const float u0 = std::clamp((bounds.x - src_left) / src_wf, 0.0f, 1.0f);
             const float u1 = std::clamp((bounds.x + bounds.w - src_left) / src_wf, 0.0f, 1.0f);
@@ -366,10 +394,12 @@ public:
         };
 
         auto append_transformed_brush_mesh = [&](const DrawCommand& cmd) -> bool {
+            const eui::graphics::Brush* brush = resolve_brush(cmd);
+            const eui::graphics::Transform3D& transform = resolve_transform(cmd);
             const bool has_projected_gradient =
-                !transform_3d_is_identity(cmd.transform_3d) &&
-                (cmd.brush.kind == eui::graphics::BrushKind::linear_gradient ||
-                 cmd.brush.kind == eui::graphics::BrushKind::radial_gradient);
+                brush != nullptr && !transform_3d_is_identity(transform) &&
+                (brush->kind == eui::graphics::BrushKind::linear_gradient ||
+                 brush->kind == eui::graphics::BrushKind::radial_gradient);
             if (!has_projected_gradient) {
                 return false;
             }
@@ -388,7 +418,7 @@ public:
             const Color center_color = sample_brush(cmd, center_src_x, center_src_y);
             const float size_hint = std::max(cmd.rect.w, cmd.rect.h);
             const float rotation_hint =
-                std::fabs(cmd.transform_3d.rotation_x_deg) + std::fabs(cmd.transform_3d.rotation_y_deg);
+                std::fabs(transform.rotation_x_deg) + std::fabs(transform.rotation_y_deg);
             const int ring_count =
                 std::clamp(static_cast<int>(size_hint / 28.0f) + static_cast<int>(rotation_hint / 10.0f) + 4, 6, 18);
 
@@ -570,6 +600,7 @@ public:
             if (filled_batch.empty()) {
                 return;
             }
+            filled_batch_peak = std::max(filled_batch_peak, filled_batch.size());
             modern_gl_draw_vertices(GL_TRIANGLES, filled_batch.data(), filled_batch.size(), width, height);
             filled_batch.clear();
         };
@@ -578,6 +609,7 @@ public:
             if (outline_batch.empty()) {
                 return;
             }
+            outline_batch_peak = std::max(outline_batch_peak, outline_batch.size());
             if (use_triangle_strokes) {
                 modern_gl_draw_vertices(GL_TRIANGLES, outline_batch.data(), outline_batch.size(), width, height);
             } else {
@@ -607,8 +639,8 @@ public:
             return irect_equal(active_scissor, *desired);
         };
 
-        for (std::size_t draw_idx : visible_indices_) {
-            const DrawCommand& cmd = commands[draw_idx];
+        for (const std::uint32_t draw_idx : visible_indices_) {
+            const DrawCommand& cmd = commands[static_cast<std::size_t>(draw_idx)];
             const Rect visible_rect = command_visible_rect(cmd);
             if (clip_rect != nullptr && !rect_intersects(visible_rect, *clip_rect)) {
                 continue;
@@ -715,9 +747,16 @@ public:
 
         flush_pending_batch();
         apply_scissor(nullptr);
-        modern_gl_trim_scratch(filled_batch_scratch_, 4096u);
-        modern_gl_trim_scratch(outline_batch_scratch_, 4096u);
-        modern_gl_trim_scratch(blur_pass_vertices_scratch_, 2048u);
+        const std::size_t filled_keep = std::max<std::size_t>(4096u, filled_batch_peak + filled_batch_peak / 2u + 64u);
+        const std::size_t outline_keep =
+            std::max<std::size_t>(4096u, outline_batch_peak + outline_batch_peak / 2u + 64u);
+        const std::size_t blur_keep = std::max<std::size_t>(2048u, blur_pass_peak + blur_pass_peak / 2u + 32u);
+        eui::detail::context_retain_vector_hysteresis(filled_batch_scratch_, filled_keep, filled_batch_trim_frames_,
+                                                      120u);
+        eui::detail::context_retain_vector_hysteresis(outline_batch_scratch_, outline_keep,
+                                                      outline_batch_trim_frames_, 120u);
+        eui::detail::context_retain_vector_hysteresis(blur_pass_vertices_scratch_, blur_keep, blur_batch_trim_frames_,
+                                                      120u);
     }
 
 #if defined(_WIN32) && !defined(EUI_OPENGL_ES)
@@ -748,16 +787,32 @@ private:
 #endif
 private:
     mutable std::unique_ptr<StbFontRenderer> stb_font_renderer_{};
-    mutable std::vector<std::vector<std::uint32_t>> spatial_buckets_{};
-    mutable std::vector<std::uint32_t> spatial_marks_{};
-    mutable std::vector<std::size_t> visible_indices_{};
-    mutable std::uint32_t spatial_mark_id_{1u};
+    static constexpr int k_spatial_tile_px = 128;
+    mutable std::vector<std::uint32_t> spatial_bucket_offsets_{};
+    mutable std::vector<std::uint32_t> spatial_bucket_cursor_{};
+    mutable std::vector<std::uint32_t> spatial_bucket_indices_{};
+    mutable std::vector<std::uint16_t> spatial_marks_{};
+    mutable std::vector<std::uint32_t> visible_indices_{};
+    mutable std::uint16_t spatial_mark_id_{1u};
+    mutable const DrawCommand* spatial_commands_ptr_{nullptr};
+    mutable std::size_t spatial_command_count_{0u};
+    mutable std::uint64_t spatial_frame_hash_{0ull};
+    mutable int spatial_width_{0};
+    mutable int spatial_height_{0};
+    mutable int spatial_cols_{0};
+    mutable int spatial_rows_{0};
     mutable std::vector<ModernGlVertex> filled_batch_scratch_{};
     mutable std::vector<ModernGlVertex> outline_batch_scratch_{};
     mutable std::vector<ModernGlVertex> blur_pass_vertices_scratch_{};
+    mutable std::uint32_t filled_batch_trim_frames_{0u};
+    mutable std::uint32_t outline_batch_trim_frames_{0u};
+    mutable std::uint32_t blur_batch_trim_frames_{0u};
     mutable TextureId backdrop_texture_{0u};
     mutable int backdrop_texture_w_{0};
     mutable int backdrop_texture_h_{0};
+    mutable std::uint64_t backdrop_frame_token_{0ull};
+    mutable std::uint32_t backdrop_idle_frames_{0u};
+    mutable bool backdrop_used_in_frame_{false};
 
     void ensure_backdrop_texture(int width, int height) const {
         if (width <= 0 || height <= 0) {
@@ -778,5 +833,95 @@ private:
             backdrop_texture_w_ = width;
             backdrop_texture_h_ = height;
         }
+    }
+
+    void begin_backdrop_frame(std::uint64_t frame_hash) const {
+        const std::uint64_t frame_token = frame_hash != 0ull ? frame_hash : (backdrop_frame_token_ + 1ull);
+        if (frame_token == backdrop_frame_token_) {
+            return;
+        }
+        if (backdrop_frame_token_ != 0ull) {
+            backdrop_idle_frames_ = backdrop_used_in_frame_ ? 0u : (backdrop_idle_frames_ + 1u);
+            if (backdrop_idle_frames_ >= 240u && backdrop_texture_ != 0u) {
+                glDeleteTextures(1, &backdrop_texture_);
+                backdrop_texture_ = 0u;
+                backdrop_texture_w_ = 0;
+                backdrop_texture_h_ = 0;
+                backdrop_idle_frames_ = 0u;
+            }
+        }
+        backdrop_frame_token_ = frame_token;
+        backdrop_used_in_frame_ = false;
+    }
+
+    void ensure_spatial_index(const std::vector<DrawCommand>& commands, int width, int height,
+                              std::uint64_t frame_hash) const {
+        if (commands.size() < 96u) {
+            return;
+        }
+        if (spatial_commands_ptr_ == commands.data() && spatial_command_count_ == commands.size() &&
+            spatial_frame_hash_ == frame_hash && spatial_width_ == width && spatial_height_ == height) {
+            return;
+        }
+
+        spatial_cols_ = std::max(1, (width + k_spatial_tile_px - 1) / k_spatial_tile_px);
+        spatial_rows_ = std::max(1, (height + k_spatial_tile_px - 1) / k_spatial_tile_px);
+        const std::size_t bucket_count = static_cast<std::size_t>(spatial_cols_ * spatial_rows_);
+        spatial_bucket_offsets_.assign(bucket_count + 1u, 0u);
+
+        for (std::size_t i = 0; i < commands.size(); ++i) {
+            const Rect rect = command_visible_rect(commands[i]);
+            if (rect.w <= 0.0f || rect.h <= 0.0f) {
+                continue;
+            }
+
+            const int x0 = std::clamp(static_cast<int>(std::floor(rect.x / k_spatial_tile_px)), 0, spatial_cols_ - 1);
+            const int y0 = std::clamp(static_cast<int>(std::floor(rect.y / k_spatial_tile_px)), 0, spatial_rows_ - 1);
+            const int x1 = std::clamp(static_cast<int>(std::floor((rect.x + rect.w) / k_spatial_tile_px)), 0,
+                                      spatial_cols_ - 1);
+            const int y1 = std::clamp(static_cast<int>(std::floor((rect.y + rect.h) / k_spatial_tile_px)), 0,
+                                      spatial_rows_ - 1);
+            for (int y = y0; y <= y1; ++y) {
+                for (int x = x0; x <= x1; ++x) {
+                    spatial_bucket_offsets_[static_cast<std::size_t>(y * spatial_cols_ + x) + 1u] += 1u;
+                }
+            }
+        }
+
+        for (std::size_t i = 1; i < spatial_bucket_offsets_.size(); ++i) {
+            spatial_bucket_offsets_[i] =
+                static_cast<std::uint32_t>(spatial_bucket_offsets_[i] + spatial_bucket_offsets_[i - 1u]);
+        }
+
+        spatial_bucket_indices_.assign(spatial_bucket_offsets_.back(), 0u);
+        spatial_bucket_cursor_ = spatial_bucket_offsets_;
+
+        for (std::size_t i = 0; i < commands.size(); ++i) {
+            const Rect rect = command_visible_rect(commands[i]);
+            if (rect.w <= 0.0f || rect.h <= 0.0f) {
+                continue;
+            }
+
+            const int x0 = std::clamp(static_cast<int>(std::floor(rect.x / k_spatial_tile_px)), 0, spatial_cols_ - 1);
+            const int y0 = std::clamp(static_cast<int>(std::floor(rect.y / k_spatial_tile_px)), 0, spatial_rows_ - 1);
+            const int x1 = std::clamp(static_cast<int>(std::floor((rect.x + rect.w) / k_spatial_tile_px)), 0,
+                                      spatial_cols_ - 1);
+            const int y1 = std::clamp(static_cast<int>(std::floor((rect.y + rect.h) / k_spatial_tile_px)), 0,
+                                      spatial_rows_ - 1);
+            for (int y = y0; y <= y1; ++y) {
+                for (int x = x0; x <= x1; ++x) {
+                    const std::size_t bucket_index = static_cast<std::size_t>(y * spatial_cols_ + x);
+                    const std::uint32_t cursor = spatial_bucket_cursor_[bucket_index];
+                    spatial_bucket_indices_[cursor] = static_cast<std::uint32_t>(i);
+                    spatial_bucket_cursor_[bucket_index] = cursor + 1u;
+                }
+            }
+        }
+
+        spatial_commands_ptr_ = commands.data();
+        spatial_command_count_ = commands.size();
+        spatial_frame_hash_ = frame_hash;
+        spatial_width_ = width;
+        spatial_height_ = height;
     }
 };

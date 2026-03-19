@@ -95,21 +95,11 @@ struct DashboardState {
     int activity_range{1};
     int couriers_range{0};
     int hovered_bar{-1};
-    float page_anim{1.0f};
-    float sidebar_indicator_y{0.0f};
-    bool sidebar_indicator_ready{false};
-    float tooltip_alpha{0.0f};
-    float tooltip_center_x{0.0f};
-    float tooltip_anchor_y{0.0f};
-    std::array<float, 4> filter_mix{{0.0f, 0.0f, 1.0f, 0.0f}};
-    std::array<float, 6> order_mix{{0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f}};
-    std::array<float, 3> menu_mix{{0.0f, 0.0f, 0.0f}};
     std::string search_text{};
     OpenMenu open_menu{OpenMenu::None};
     bool settings_open{false};
     bool theme_dark{true};
     int accent_index{0};
-    float settings_mix{0.0f};
     Rect overlay_block_rect{};
     bool overlay_block_active{false};
 };
@@ -307,33 +297,8 @@ float smoothstep01(float value) {
     return t * t * (3.0f - 2.0f * t);
 }
 
-float animate_to(float current, float target, float speed, float dt) {
-    if (dt <= 0.0f) {
-        return current;
-    }
-    const float blend = 1.0f - std::exp(-speed * dt);
-    return current + (target - current) * blend;
-}
-
 std::size_t menu_slot(OpenMenu menu) {
     return static_cast<std::size_t>(static_cast<int>(menu) - 1);
-}
-
-template <std::size_t N>
-bool array_animating(const std::array<float, N>& values) {
-    for (float value : values) {
-        if (value > 0.01f && value < 0.99f) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool dashboard_needs_animation(const DashboardState& state) {
-    const float settings_target = state.settings_open ? 1.0f : 0.0f;
-    return state.page_anim < 0.995f || state.tooltip_alpha > 0.02f || state.hovered_bar >= 0 ||
-           std::fabs(state.settings_mix - settings_target) > 0.01f || array_animating(state.filter_mix) ||
-           array_animating(state.order_mix) || array_animating(state.menu_mix);
 }
 
 Rect inset_rect(const Rect& rect, float padding) {
@@ -439,18 +404,21 @@ void draw_top_profile(UI& ui, const Rect& rect, float scale, const Palette& pale
 
 template <std::size_t N>
 void draw_dropdown_control(UI& ui, const eui::InputState& input, Rect button, OpenMenu menu_id, OpenMenu& open_menu,
-                           int& selected_index, const std::array<const char*, N>& labels, float scale, float dt,
+                           int& selected_index, const std::array<const char*, N>& labels, float scale,
                            DashboardState& state, const Palette& palette) {
     const std::size_t menu_index = menu_slot(menu_id);
+    const std::uint64_t menu_motion_id =
+        ui.id("dashboard/dropdown", static_cast<std::uint64_t>(menu_index + 1u));
     const float radius = button.h * 0.5f;
     const bool button_hovered = interactive_hovered(state, input, button);
     if (interactive_clicked(state, input, button)) {
+        if (open_menu != menu_id) {
+            ui.reset_motion(menu_motion_id, 0.0f);
+        }
         open_menu = (open_menu == menu_id) ? OpenMenu::None : menu_id;
     }
 
-    state.menu_mix[menu_index] = animate_to(state.menu_mix[menu_index], open_menu == menu_id ? 1.0f : 0.0f,
-                                            open_menu == menu_id ? 18.0f : 14.0f, dt);
-    const float menu_mix = smoothstep01(state.menu_mix[menu_index]);
+    const float menu_mix = smoothstep01(ui.presence(menu_motion_id, open_menu == menu_id, 18.0f, 14.0f));
 
     ui.shape()
         .in(button)
@@ -528,19 +496,18 @@ void draw_dropdown_control(UI& ui, const eui::InputState& input, Rect button, Op
     }
 }
 
-void draw_sidebar(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale, float dt, const Palette& palette) {
+void draw_sidebar(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale, const Palette& palette) {
     draw_fill(ui, rect, palette.panel, 0.0f, 1.0f);
     ui.shape().in(Rect{rect.x + rect.w - 1.0f, rect.y, 1.0f, rect.h}).fill(palette.divider, 0.95f).draw();
 
     const float slot_h = 58.0f * scale;
     const float indicator_target_y = rect.y + static_cast<float>(static_cast<int>(state.nav)) * slot_h;
-    if (!state.sidebar_indicator_ready) {
-        state.sidebar_indicator_y = indicator_target_y;
-        state.sidebar_indicator_ready = true;
-    } else {
-        state.sidebar_indicator_y = animate_to(state.sidebar_indicator_y, indicator_target_y, 16.0f, dt);
+    const std::uint64_t indicator_motion_id = ui.id("dashboard/sidebar-indicator");
+    if (ui.motion_value(indicator_motion_id, -1.0f) < 0.0f) {
+        ui.reset_motion(indicator_motion_id, indicator_target_y);
     }
-    const Rect indicator{rect.x, state.sidebar_indicator_y, rect.w, slot_h};
+    const float indicator_y = ui.motion(indicator_motion_id, indicator_target_y, 16.0f);
+    const Rect indicator{rect.x, indicator_y, rect.w, slot_h};
     draw_fill(ui, indicator, 0xF8F8FA, 0.0f, 1.0f);
     draw_fill(ui, Rect{indicator.x, indicator.y, 4.0f * scale, indicator.h}, palette.accent, 0.0f, 1.0f);
 
@@ -550,7 +517,7 @@ void draw_sidebar(UI& ui, const eui::InputState& input, DashboardState& state, c
             const NavItem next = static_cast<NavItem>(static_cast<int>(i));
             if (next != state.nav) {
                 state.nav = next;
-                state.page_anim = 0.0f;
+                ui.reset_motion("dashboard/page-reveal", 0.0f);
                 state.hovered_bar = -1;
                 state.settings_open = false;
             }
@@ -568,6 +535,9 @@ void draw_sidebar(UI& ui, const eui::InputState& input, DashboardState& state, c
     const Rect gear_slot{rect.x, rect.y + rect.h - slot_h * 2.0f, rect.w, slot_h};
     const Rect logout_slot{rect.x, rect.y + rect.h - slot_h, rect.w, slot_h};
     if (interactive_clicked(state, input, gear_slot)) {
+        if (!state.settings_open) {
+            ui.reset_motion("dashboard/settings-panel", 0.0f);
+        }
         state.settings_open = !state.settings_open;
         state.open_menu = OpenMenu::None;
     }
@@ -648,7 +618,7 @@ void draw_metric_card(UI& ui, const Rect& rect, const MetricCard& card, bool hig
     draw_text_left(ui, card.delta, delta_rect, 11.8f * scale, palette.text, 0.95f);
 }
 
-void draw_filter_chip(UI& ui, const eui::InputState& input, DashboardState& state, int filter_index, Rect rect, float scale, float dt,
+void draw_filter_chip(UI& ui, const eui::InputState& input, DashboardState& state, int filter_index, Rect rect, float scale,
                       const Palette& palette) {
     const bool selected = state.filter_index == filter_index;
     if (interactive_clicked(state, input, rect)) {
@@ -656,8 +626,8 @@ void draw_filter_chip(UI& ui, const eui::InputState& input, DashboardState& stat
     }
 
     const std::size_t index = static_cast<std::size_t>(filter_index);
-    state.filter_mix[index] = animate_to(state.filter_mix[index], selected ? 1.0f : 0.0f, 18.0f, dt);
-    const float active_mix = state.filter_mix[index];
+    const float active_mix =
+        ui.presence(ui.id("dashboard/filter-chip", static_cast<std::uint64_t>(index)), selected, 18.0f, 18.0f);
     const Rect visual{rect.x, rect.y - active_mix * 2.0f * scale, rect.w, rect.h};
     const float radius = visual.h * 0.5f;
     draw_fill(ui, visual, palette.chip, radius, 1.0f);
@@ -696,15 +666,15 @@ void draw_status_pill(UI& ui, const Rect& rect, const OrderRow& row, float scale
 }
 
 void draw_order_row(UI& ui, const eui::InputState& input, DashboardState& state, int index, const Rect& rect, const OrderRow& row,
-                    float scale, float dt, const Palette& palette) {
+                    float scale, const Palette& palette) {
     if (interactive_clicked(state, input, rect)) {
         state.selected_order = index;
     }
 
     const bool selected = state.selected_order == index;
     const std::size_t row_index = static_cast<std::size_t>(index);
-    state.order_mix[row_index] = animate_to(state.order_mix[row_index], selected ? 1.0f : 0.0f, 10.0f, dt);
-    const float selected_mix = state.order_mix[row_index];
+    const float selected_mix =
+        ui.presence(ui.id("dashboard/order-row", static_cast<std::uint64_t>(row_index)), selected, 10.0f, 10.0f);
     const Rect visual = rect;
     if (selected_mix > 0.01f) {
         draw_fill(ui, visual, palette.panel_alt, 14.0f * scale, selected_mix * 0.92f);
@@ -743,14 +713,14 @@ void draw_order_row(UI& ui, const eui::InputState& input, DashboardState& state,
 }
 
 void draw_orders_panel(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale,
-                       float dt, const Palette& palette, std::string_view title) {
+                       const Palette& palette, std::string_view title) {
     draw_fill(ui, rect, palette.panel, 0.0f, 1.0f);
     draw_stroke(ui, rect, palette.divider, 0.0f, 1.0f, 1.0f);
 
     const Rect inner = inset_rect(rect, 26.0f * scale);
     draw_text_left(ui, title, Rect{inner.x, inner.y + 8.0f * scale, 220.0f * scale, 28.0f * scale}, 23.0f * scale, palette.text, 1.0f);
     draw_dropdown_control(ui, input, Rect{inner.x + inner.w - 128.0f * scale, inner.y, 128.0f * scale, 42.0f * scale},
-                          OpenMenu::Orders, state.open_menu, state.orders_range, kOrdersRanges, scale, dt, state, palette);
+                          OpenMenu::Orders, state.open_menu, state.orders_range, kOrdersRanges, scale, state, palette);
 
     const float chip_y = inner.y + 56.0f * scale;
     float chip_x = inner.x;
@@ -758,7 +728,7 @@ void draw_orders_panel(UI& ui, const eui::InputState& input, DashboardState& sta
         const float w = ui.measure_text(kFilterLabels[static_cast<std::size_t>(i)], 11.0f * scale) + 52.0f * scale;
         const float count_w = std::max(24.0f * scale, ui.measure_text(kFilterCounts[static_cast<std::size_t>(i)], 11.0f * scale) + 14.0f * scale);
         const Rect chip{chip_x, chip_y, w + count_w, 34.0f * scale};
-        draw_filter_chip(ui, input, state, i, chip, scale, dt, palette);
+        draw_filter_chip(ui, input, state, i, chip, scale, palette);
         chip_x += chip.w + 10.0f * scale;
     }
 
@@ -772,12 +742,12 @@ void draw_orders_panel(UI& ui, const eui::InputState& input, DashboardState& sta
     const float row_h = 74.0f * scale;
     float row_y = header_y + 26.0f * scale;
     for (std::size_t i = 0; i < kOrders.size(); ++i) {
-        draw_order_row(ui, input, state, static_cast<int>(i), Rect{inner.x, row_y, inner.w, row_h}, kOrders[i], scale, dt, palette);
+        draw_order_row(ui, input, state, static_cast<int>(i), Rect{inner.x, row_y, inner.w, row_h}, kOrders[i], scale, palette);
         row_y += row_h;
     }
 }
 
-void draw_activity_panel(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale, float dt,
+void draw_activity_panel(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale,
                          const Palette& palette, std::string_view title) {
     draw_fill(ui, rect, palette.panel, 0.0f, 1.0f);
     draw_stroke(ui, rect, palette.divider, 0.0f, 1.0f, 1.0f);
@@ -813,7 +783,7 @@ void draw_activity_panel(UI& ui, const eui::InputState& input, DashboardState& s
     const Rect inner = inset_rect(rect, 28.0f * scale, 22.0f * scale);
     draw_text_left(ui, title, Rect{inner.x, inner.y, 180.0f * scale, 28.0f * scale}, 22.0f * scale, palette.text, 1.0f);
     draw_dropdown_control(ui, input, Rect{inner.x + inner.w - 134.0f * scale, inner.y - 2.0f * scale, 134.0f * scale, 42.0f * scale},
-                          OpenMenu::Activity, state.open_menu, state.activity_range, kActivityRanges, scale, dt, state, palette);
+                          OpenMenu::Activity, state.open_menu, state.activity_range, kActivityRanges, scale, state, palette);
 
     const Rect chart_rect = inset_rect(Rect{inner.x, inner.y + 44.0f * scale, inner.w, inner.h - 44.0f * scale},
                                        0.0f, 18.0f * scale, 0.0f, 16.0f * scale);
@@ -857,32 +827,35 @@ void draw_activity_panel(UI& ui, const eui::InputState& input, DashboardState& s
     }
 
     state.hovered_bar = hovered_index;
-    const float target_alpha = hovered_index >= 0 ? 1.0f : 0.0f;
-    state.tooltip_alpha = animate_to(state.tooltip_alpha, target_alpha, hovered_index >= 0 ? 18.0f : 12.0f, dt);
+    const std::uint64_t tooltip_alpha_id = ui.id("dashboard/activity-tooltip-alpha");
+    const std::uint64_t tooltip_x_id = ui.id("dashboard/activity-tooltip-x");
+    const std::uint64_t tooltip_y_id = ui.id("dashboard/activity-tooltip-y");
+    const float tooltip_alpha = ui.presence(tooltip_alpha_id, hovered_index >= 0, 18.0f, 12.0f);
 
     if (hovered_index >= 0) {
         const float hovered_h = plot_rect.h * (bars[static_cast<std::size_t>(hovered_index)] / max_value);
         const float hovered_x = plot_rect.x + static_cast<float>(hovered_index) * (bar_w + gap);
         const float target_center_x = hovered_x + bar_w * 0.5f;
         const float target_anchor_y = plot_rect.y + plot_rect.h - hovered_h;
-        if (state.tooltip_alpha < 0.02f) {
-            state.tooltip_center_x = target_center_x;
-            state.tooltip_anchor_y = target_anchor_y;
-        } else {
-            state.tooltip_center_x = animate_to(state.tooltip_center_x, target_center_x, 18.0f, dt);
-            state.tooltip_anchor_y = animate_to(state.tooltip_anchor_y, target_anchor_y, 18.0f, dt);
+        if (tooltip_alpha < 0.02f) {
+            ui.reset_motion(tooltip_x_id, target_center_x);
+            ui.reset_motion(tooltip_y_id, target_anchor_y);
         }
+        ui.motion(tooltip_x_id, target_center_x, 18.0f);
+        ui.motion(tooltip_y_id, target_anchor_y, 18.0f);
     }
 
-    if (state.tooltip_alpha > 0.02f) {
+    if (tooltip_alpha > 0.02f) {
+        const float tooltip_center_x = ui.motion_value(tooltip_x_id, plot_rect.x + plot_rect.w * 0.5f);
+        const float tooltip_anchor_y = ui.motion_value(tooltip_y_id, plot_rect.y + plot_rect.h * 0.5f);
         const float bubble_w = 108.0f * scale;
         const float bubble_h = 36.0f * scale;
-        const float bubble_x = std::clamp(state.tooltip_center_x - bubble_w * 0.5f, plot_rect.x, plot_rect.x + plot_rect.w - bubble_w);
-        const float bubble_y = std::clamp(state.tooltip_anchor_y - bubble_h - 18.0f * scale,
+        const float bubble_x = std::clamp(tooltip_center_x - bubble_w * 0.5f, plot_rect.x, plot_rect.x + plot_rect.w - bubble_w);
+        const float bubble_y = std::clamp(tooltip_anchor_y - bubble_h - 18.0f * scale,
                                           chart_rect.y + 6.0f * scale,
                                           plot_rect.y + plot_rect.h - bubble_h - 8.0f * scale);
         const Rect bubble{bubble_x, bubble_y, bubble_w, bubble_h};
-        const float arrow_offset = std::clamp(state.tooltip_center_x - bubble.x - 6.0f * scale, 16.0f * scale, bubble.w - 16.0f * scale);
+        const float arrow_offset = std::clamp(tooltip_center_x - bubble.x - 6.0f * scale, 16.0f * scale, bubble.w - 16.0f * scale);
         const Rect arrow{bubble.x + arrow_offset, bubble.y + bubble.h - 4.0f * scale, 12.0f * scale, 12.0f * scale};
         const int safe_index = std::clamp(std::max(hovered_index, 0), 0, static_cast<int>(bars.size() - 1u));
         const std::string tooltip_text = std::to_string(static_cast<int>(std::lround(bars[static_cast<std::size_t>(safe_index)]))) + " orders";
@@ -890,14 +863,14 @@ void draw_activity_panel(UI& ui, const eui::InputState& input, DashboardState& s
         ui.shape()
             .in(bubble)
             .radius(bubble.h * 0.5f)
-            .fill(0xFBFBFD, state.tooltip_alpha * 0.95f)
-            .stroke(0xFFFFFF, 1.0f, state.tooltip_alpha)
-            .shadow(0.0f, 4.0f * scale, 10.0f * scale, 0x020617, state.tooltip_alpha * 0.12f)
+            .fill(0xFBFBFD, tooltip_alpha * 0.95f)
+            .stroke(0xFFFFFF, 1.0f, tooltip_alpha)
+            .shadow(0.0f, 4.0f * scale, 10.0f * scale, 0x020617, tooltip_alpha * 0.12f)
             .draw();
-        draw_text_center(ui, tooltip_text, bubble, 11.4f * scale, 0x181B2A, state.tooltip_alpha);
+        draw_text_center(ui, tooltip_text, bubble, 11.4f * scale, 0x181B2A, tooltip_alpha);
         ui.shape().in(arrow)
             .radius(2.0f * scale)
-            .fill(0xFBFBFD, state.tooltip_alpha * 0.95f)
+            .fill(0xFBFBFD, tooltip_alpha * 0.95f)
             .rotate(45.0f)
             .origin_center()
             .draw();
@@ -914,14 +887,14 @@ void draw_courier_entry(UI& ui, const Rect& rect, const Courier& courier, float 
 }
 
 void draw_couriers_panel(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale,
-                         float dt, const Palette& palette, std::string_view title) {
+                         const Palette& palette, std::string_view title) {
     draw_fill(ui, rect, palette.panel, 0.0f, 1.0f);
     draw_stroke(ui, rect, palette.divider, 0.0f, 1.0f, 1.0f);
 
     const Rect inner = inset_rect(rect, 28.0f * scale, 22.0f * scale);
     draw_text_left(ui, title, Rect{inner.x, inner.y, 220.0f * scale, 28.0f * scale}, 22.0f * scale, palette.text, 1.0f);
     draw_dropdown_control(ui, input, Rect{inner.x + inner.w - 116.0f * scale, inner.y - 4.0f * scale, 116.0f * scale, 40.0f * scale},
-                          OpenMenu::Couriers, state.open_menu, state.couriers_range, kCouriersRanges, scale, dt, state, palette);
+                          OpenMenu::Couriers, state.open_menu, state.couriers_range, kCouriersRanges, scale, state, palette);
 
     const Rect content{inner.x, inner.y + 60.0f * scale, inner.w, inner.h - 60.0f * scale};
     const float gap_x = 26.0f * scale;
@@ -952,8 +925,8 @@ Rect settings_panel_rect(const Rect& rect, float scale, float mix) {
 }
 
 void draw_settings_panel(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale,
-                         const Palette& palette) {
-    const float panel_mix = std::clamp(state.settings_mix, 0.0f, 1.0f);
+                         const Palette& palette, float panel_mix) {
+    panel_mix = std::clamp(panel_mix, 0.0f, 1.0f);
     const Rect panel = settings_panel_rect(rect, scale, panel_mix);
     ui.shape()
         .in(panel)
@@ -1031,7 +1004,7 @@ void draw_settings_panel(UI& ui, const eui::InputState& input, DashboardState& s
     draw_mode_button(dark_rect, state.theme_dark, "Dark", 0xF186u);
     draw_mode_button(light_rect, !state.theme_dark, "Day", 0xF185u);
 
-    const Rect accent_rect{inner.x, appearance_rect.y + appearance_rect.h + 16.0f * scale, inner.w, 190.0f * scale};
+    const Rect accent_rect{inner.x, appearance_rect.y + appearance_rect.h + 16.0f * scale, inner.w, 240.0f * scale};
     draw_fill(ui, accent_rect, palette.panel_alt, 18.0f * scale, 0.86f);
     draw_stroke(ui, accent_rect, palette.divider, 18.0f * scale, 1.0f, 1.0f);
     draw_text_left(ui, "Theme Color", Rect{accent_rect.x + 18.0f * scale, accent_rect.y + 18.0f * scale,
@@ -1080,7 +1053,8 @@ void draw_settings_panel(UI& ui, const eui::InputState& input, DashboardState& s
     ui.ctx().set_global_alpha(1.0f);
 }
 
-void draw_dashboard(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale, float dt, const Palette& palette) {
+void draw_dashboard(UI& ui, const eui::InputState& input, DashboardState& state, const Rect& rect, float scale,
+                    const Palette& palette) {
     const PageCopy& page = page_copy(state.nav);
     draw_fill(ui, rect, palette.shell, 10.0f * scale, 1.0f);
     draw_stroke(ui, rect, palette.divider_strong, 10.0f * scale, 1.0f, 1.0f);
@@ -1091,16 +1065,16 @@ void draw_dashboard(UI& ui, const eui::InputState& input, DashboardState& state,
     const Rect body_rect{rect.x, rect.y + header_h, rect.w, rect.h - header_h};
     const Rect sidebar_rect{body_rect.x, body_rect.y, sidebar_w, body_rect.h};
     const Rect main_rect{body_rect.x + sidebar_w, body_rect.y, body_rect.w - sidebar_w, body_rect.h};
-    state.settings_mix = animate_to(state.settings_mix, state.settings_open ? 1.0f : 0.0f,
-                                    state.settings_open ? 7.0f : 7.4f, dt);
-    if (state.settings_mix > 0.01f) {
+
+    draw_header(ui, header_rect, scale, state, palette, sidebar_w, page);
+    draw_sidebar(ui, input, state, sidebar_rect, scale, palette);
+
+    const float settings_mix = ui.presence("dashboard/settings-panel", state.settings_open, 7.0f, 7.4f);
+    if (settings_mix > 0.01f) {
         set_overlay_block(state, Rect{rect.x, rect.y, rect.w, rect.h});
     }
 
-    draw_header(ui, header_rect, scale, state, palette, sidebar_w, page);
-    draw_sidebar(ui, input, state, sidebar_rect, scale, dt, palette);
-
-    const float reveal = smoothstep01(state.page_anim);
+    const float reveal = smoothstep01(ui.motion("dashboard/page-reveal", 1.0f, 8.0f));
     const float reveal_offset_x = (1.0f - reveal) * 26.0f * scale;
     const float reveal_offset_y = (1.0f - reveal) * 10.0f * scale;
     ui.ctx().set_global_alpha(reveal);
@@ -1121,10 +1095,10 @@ void draw_dashboard(UI& ui, const eui::InputState& input, DashboardState& state,
                 const Rect activity_rect{lower_rect.x, lower_rect.y, left_w, lower_rect.h};
                 const Rect side_rect{lower_rect.x + left_w, lower_rect.y, lower_rect.w - left_w, lower_rect.h};
                 const float top_h = side_rect.h * 0.54f;
-                draw_activity_panel(ui, input, state, activity_rect, scale, dt, palette, page.activity_title);
-                draw_orders_panel(ui, input, state, Rect{side_rect.x, side_rect.y, side_rect.w, top_h}, scale, dt, palette, page.orders_title);
+                draw_activity_panel(ui, input, state, activity_rect, scale, palette, page.activity_title);
+                draw_orders_panel(ui, input, state, Rect{side_rect.x, side_rect.y, side_rect.w, top_h}, scale, palette, page.orders_title);
                 draw_couriers_panel(ui, input, state, Rect{side_rect.x, side_rect.y + top_h, side_rect.w, side_rect.h - top_h},
-                                    scale, dt, palette, page.couriers_title);
+                                    scale, palette, page.couriers_title);
                 break;
             }
             case NavItem::Documents: {
@@ -1132,11 +1106,11 @@ void draw_dashboard(UI& ui, const eui::InputState& input, DashboardState& state,
                 const Rect top_rect{lower_rect.x, lower_rect.y, lower_rect.w, top_h};
                 const Rect bottom_rect{lower_rect.x, lower_rect.y + top_h, lower_rect.w, lower_rect.h - top_h};
                 const float split_w = bottom_rect.w * 0.58f;
-                draw_orders_panel(ui, input, state, top_rect, scale, dt, palette, page.orders_title);
+                draw_orders_panel(ui, input, state, top_rect, scale, palette, page.orders_title);
                 draw_activity_panel(ui, input, state, Rect{bottom_rect.x, bottom_rect.y, split_w, bottom_rect.h},
-                                    scale, dt, palette, page.activity_title);
+                                    scale, palette, page.activity_title);
                 draw_couriers_panel(ui, input, state, Rect{bottom_rect.x + split_w, bottom_rect.y, bottom_rect.w - split_w, bottom_rect.h},
-                                    scale, dt, palette, page.couriers_title);
+                                    scale, palette, page.couriers_title);
                 break;
             }
             case NavItem::Wallet: {
@@ -1144,10 +1118,10 @@ void draw_dashboard(UI& ui, const eui::InputState& input, DashboardState& state,
                 const Rect top_rect{lower_rect.x, lower_rect.y, lower_rect.w, top_h};
                 const Rect bottom_rect{lower_rect.x, lower_rect.y + top_h, lower_rect.w, lower_rect.h - top_h};
                 const float left_w = bottom_rect.w * 0.57f;
-                draw_activity_panel(ui, input, state, top_rect, scale, dt, palette, page.activity_title);
-                draw_orders_panel(ui, input, state, Rect{bottom_rect.x, bottom_rect.y, left_w, bottom_rect.h}, scale, dt, palette, page.orders_title);
+                draw_activity_panel(ui, input, state, top_rect, scale, palette, page.activity_title);
+                draw_orders_panel(ui, input, state, Rect{bottom_rect.x, bottom_rect.y, left_w, bottom_rect.h}, scale, palette, page.orders_title);
                 draw_couriers_panel(ui, input, state, Rect{bottom_rect.x + left_w, bottom_rect.y, bottom_rect.w - left_w, bottom_rect.h},
-                                    scale, dt, palette, page.couriers_title);
+                                    scale, palette, page.couriers_title);
                 break;
             }
             case NavItem::Analytics: {
@@ -1155,10 +1129,10 @@ void draw_dashboard(UI& ui, const eui::InputState& input, DashboardState& state,
                 const Rect chart_rect{lower_rect.x, lower_rect.y, lower_rect.w, chart_h};
                 const Rect bottom_rect{lower_rect.x, lower_rect.y + chart_h, lower_rect.w, lower_rect.h - chart_h};
                 const float left_w = bottom_rect.w * 0.52f;
-                draw_activity_panel(ui, input, state, chart_rect, scale, dt, palette, page.activity_title);
-                draw_orders_panel(ui, input, state, Rect{bottom_rect.x, bottom_rect.y, left_w, bottom_rect.h}, scale, dt, palette, page.orders_title);
+                draw_activity_panel(ui, input, state, chart_rect, scale, palette, page.activity_title);
+                draw_orders_panel(ui, input, state, Rect{bottom_rect.x, bottom_rect.y, left_w, bottom_rect.h}, scale, palette, page.orders_title);
                 draw_couriers_panel(ui, input, state, Rect{bottom_rect.x + left_w, bottom_rect.y, bottom_rect.w - left_w, bottom_rect.h},
-                                    scale, dt, palette, page.couriers_title);
+                                    scale, palette, page.couriers_title);
                 break;
             }
             case NavItem::Dashboard:
@@ -1167,19 +1141,19 @@ void draw_dashboard(UI& ui, const eui::InputState& input, DashboardState& state,
                 const Rect orders_rect{lower_rect.x, lower_rect.y, left_w, lower_rect.h};
                 const Rect right_rect{lower_rect.x + left_w, lower_rect.y, lower_rect.w - left_w, lower_rect.h};
                 const float activity_h = right_rect.h * 0.62f;
-                draw_orders_panel(ui, input, state, orders_rect, scale, dt, palette, page.orders_title);
-                draw_activity_panel(ui, input, state, Rect{right_rect.x, right_rect.y, right_rect.w, activity_h}, scale, dt, palette, page.activity_title);
+                draw_orders_panel(ui, input, state, orders_rect, scale, palette, page.orders_title);
+                draw_activity_panel(ui, input, state, Rect{right_rect.x, right_rect.y, right_rect.w, activity_h}, scale, palette, page.activity_title);
                 draw_couriers_panel(ui, input, state, Rect{right_rect.x, right_rect.y + activity_h, right_rect.w, right_rect.h - activity_h},
-                                    scale, dt, palette, page.couriers_title);
+                                    scale, palette, page.couriers_title);
                 break;
             }
         }
     });
     ui.ctx().set_global_alpha(1.0f);
 
-    if (state.settings_mix > 0.01f) {
-        draw_fill(ui, rect, 0x020617, 10.0f * scale, 0.10f * smoothstep01(state.settings_mix));
-        draw_settings_panel(ui, input, state, rect, scale, palette);
+    if (settings_mix > 0.01f) {
+        draw_fill(ui, rect, 0x020617, 10.0f * scale, 0.10f * smoothstep01(settings_mix));
+        draw_settings_panel(ui, input, state, rect, scale, palette, settings_mix);
     }
 }
 
@@ -1207,7 +1181,6 @@ int main() {
             auto& ctx = frame.context();
             const auto metrics = frame.window_metrics();
             const auto& input = ctx.input_state();
-            const float dt = frame.delta_seconds_f32();
             const float framebuffer_w = static_cast<float>(metrics.framebuffer_w);
             const float framebuffer_h = static_cast<float>(metrics.framebuffer_h);
             const float scale = std::min(framebuffer_w / 1440.0f, framebuffer_h / 900.0f);
@@ -1223,13 +1196,12 @@ int main() {
                           static_cast<float>(accent_hex & 0xffu) / 255.0f, 1.0f));
             ctx.set_corner_radius(10.0f * scale);
 
-            state.page_anim = animate_to(state.page_anim, 1.0f, 8.0f, dt);
             state.overlay_block_active = false;
             state.overlay_block_rect = Rect{};
             UI ui(ctx);
-            draw_dashboard(ui, input, state, Rect{margin, margin, framebuffer_w - margin * 2.0f, framebuffer_h - margin * 2.0f}, scale, dt, palette);
+            draw_dashboard(ui, input, state, Rect{margin, margin, framebuffer_w - margin * 2.0f, framebuffer_h - margin * 2.0f}, scale, palette);
 
-            if (dashboard_needs_animation(state)) {
+            if (ctx.consume_repaint_request()) {
                 frame.request_next_frame();
             }
         },
