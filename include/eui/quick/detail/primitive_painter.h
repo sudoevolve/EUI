@@ -37,11 +37,30 @@ inline bool brush_primary_color(const eui::graphics::Brush& brush, eui::graphics
     }
 }
 
+inline eui::graphics::Transform3D combine_rect_transforms(const eui::graphics::Transform2D& transform_2d,
+                                                          const eui::graphics::Transform3D& transform_3d) {
+    eui::graphics::Transform3D combined = transform_3d;
+    combined.translation_x += transform_2d.translation_x;
+    combined.translation_y += transform_2d.translation_y;
+    combined.scale_x *= std::max(0.0f, transform_2d.scale_x);
+    combined.scale_y *= std::max(0.0f, transform_2d.scale_y);
+    combined.rotation_z_deg += transform_2d.rotation_deg;
+
+    if (std::fabs(combined.origin_x) <= 1e-6f) {
+        combined.origin_x = transform_2d.origin_x;
+    }
+    if (std::fabs(combined.origin_y) <= 1e-6f) {
+        combined.origin_y = transform_2d.origin_y;
+    }
+
+    return combined;
+}
+
 inline eui::Rect resolve_rect(const eui::graphics::RectanglePrimitive& primitive) {
-    eui::Rect rect = eui::to_legacy_rect(primitive.rect);
-    rect = eui::apply_rect_transform_2d(rect, primitive.transform_2d);
-    rect = eui::projected_rect_bounds(rect, primitive.transform_3d);
-    return rect;
+    const eui::Rect rect = eui::to_legacy_rect(primitive.rect);
+    const eui::graphics::Transform3D combined =
+        combine_rect_transforms(primitive.transform_2d, primitive.transform_3d);
+    return eui::projected_rect_bounds(rect, combined);
 }
 
 inline eui::Rect resolve_rect(const eui::graphics::ImagePrimitive& primitive) {
@@ -113,11 +132,13 @@ inline void paint_fill_brush(eui::Context& ui, const eui::Rect& rect, float radi
 }
 
 inline void paint_rectangle(eui::Context& ui, const eui::graphics::RectanglePrimitive& primitive) {
-    const eui::Rect base_rect = eui::apply_rect_transform_2d(eui::to_legacy_rect(primitive.rect), primitive.transform_2d);
-    const eui::Rect rect = eui::projected_rect_bounds(base_rect, primitive.transform_3d);
+    const eui::Rect base_rect = eui::to_legacy_rect(primitive.rect);
+    const eui::graphics::Transform3D combined =
+        combine_rect_transforms(primitive.transform_2d, primitive.transform_3d);
+    const eui::Rect rect = eui::projected_rect_bounds(base_rect, combined);
     const float radius = average_corner_radius(primitive.radius);
     const float opacity = std::clamp(primitive.opacity, 0.0f, 1.0f);
-    const bool has_transform_3d = !eui::transform_3d_is_identity(primitive.transform_3d);
+    const bool has_transform_3d = !eui::transform_3d_is_identity(combined);
     const float blur_radius = std::max(primitive.blur.radius, primitive.blur.backdrop_radius);
 
     const bool has_clip = primitive.clip.mode == eui::graphics::ClipMode::bounds;
@@ -128,7 +149,7 @@ inline void paint_rectangle(eui::Context& ui, const eui::graphics::RectanglePrim
     paint_shadow_approx(ui, rect, radius, primitive.shadow, opacity);
     if (blur_radius > 0.0f) {
         if (has_transform_3d) {
-            ui.paint_backdrop_blur(base_rect, radius, blur_radius, opacity, &primitive.transform_3d);
+            ui.paint_backdrop_blur(base_rect, radius, blur_radius, opacity, &combined);
         } else {
             ui.paint_backdrop_blur(base_rect, radius, blur_radius, opacity);
         }
@@ -156,7 +177,7 @@ inline void paint_rectangle(eui::Context& ui, const eui::graphics::RectanglePrim
                 break;
         }
         if (scaled_fill.kind != eui::graphics::BrushKind::none) {
-            ui.paint_filled_rect(base_rect, scaled_fill, radius, &primitive.transform_3d);
+            ui.paint_filled_rect(base_rect, scaled_fill, radius, &combined);
         }
     } else {
         paint_fill_brush(ui, base_rect, radius, primitive.fill, opacity);
@@ -171,7 +192,7 @@ inline void paint_rectangle(eui::Context& ui, const eui::graphics::RectanglePrim
                 stroke_color.b,
                 std::clamp(stroke_color.a * opacity, 0.0f, 1.0f));
             if (has_transform_3d) {
-                ui.paint_outline_rect(base_rect, legacy, radius, primitive.stroke.width, &primitive.transform_3d);
+                ui.paint_outline_rect(base_rect, legacy, radius, primitive.stroke.width, &combined);
             } else {
                 ui.paint_outline_rect(base_rect, legacy, radius, primitive.stroke.width);
             }
