@@ -139,6 +139,7 @@ EUI/
 |  |- calculator_demo.cpp
 |  |- minimal_demo.cpp
 |  |- layout_examples_demo.cpp
+|  |- multi_scrollbars_demo.cpp
 |  `- sidebar_navigation_demo.cpp
 |- CMakeLists.txt
 |- index.html
@@ -174,6 +175,7 @@ When OpenGL + GLFW are available, CMake creates:
 - `eui_calculator_demo` (`examples/calculator_demo.cpp`)
 - `eui_layout_examples_demo` (`examples/layout_examples_demo.cpp`)
 - `eui_minimal_demo` (`examples/minimal_demo.cpp`)
+- `eui_multi_scrollbars_demo` (`examples/multi_scrollbars_demo.cpp`)
 - `eui_sidebar_navigation_demo` (`examples/sidebar_navigation_demo.cpp`)
 
 Important options:
@@ -234,6 +236,9 @@ cmake --build build --target eui_layout_examples_demo
 # minimal demo
 cmake --build build --target eui_minimal_demo
 
+# multi scrollbars demo
+cmake --build build --target eui_multi_scrollbars_demo
+
 # sidebar navigation demo
 cmake --build build --target eui_sidebar_navigation_demo
 ```
@@ -284,6 +289,7 @@ const auto& text_arena = ui.text_arena();
 - For icon + text, use **two ASCII spaces** between them (for example `u8"\uF015  Dashboard"`).
 - EUI will split icon/text and render them separately, which keeps vertical alignment stable.
 - See `examples/sidebar_navigation_demo.cpp` for a minimal left-sidebar + page-transition sample.
+- See `examples/multi_scrollbars_demo.cpp` for a window that keeps multiple scrollbars visible at once.
 
 ```cpp
 // Left-aligned nav item with icon + text (stable vertical centering)

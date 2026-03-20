@@ -139,6 +139,7 @@ EUI/
 |  |- calculator_demo.cpp
 |  |- minimal_demo.cpp
 |  |- layout_examples_demo.cpp
+|  |- multi_scrollbars_demo.cpp
 |  `- sidebar_navigation_demo.cpp
 |- CMakeLists.txt
 |- index.html
@@ -174,6 +175,7 @@ cmake --build build
 - `eui_calculator_demo`（`examples/calculator_demo.cpp`）
 - `eui_layout_examples_demo`（`examples/layout_examples_demo.cpp`）
 - `eui_minimal_demo`（`examples/minimal_demo.cpp`）
+- `eui_multi_scrollbars_demo`（`examples/multi_scrollbars_demo.cpp`）
 - `eui_sidebar_navigation_demo`（`examples/sidebar_navigation_demo.cpp`）
 
 重要 CMake 选项：
@@ -234,6 +236,9 @@ cmake --build build --target eui_layout_examples_demo
 # 极简 demo
 cmake --build build --target eui_minimal_demo
 
+# 多滚动条 demo
+cmake --build build --target eui_multi_scrollbars_demo
+
 # 侧边栏导航 demo
 cmake --build build --target eui_sidebar_navigation_demo
 ```
@@ -284,6 +289,7 @@ const auto& text_arena = ui.text_arena();
 - 图标 + 文本请使用 **两个 ASCII 空格** 分隔（例如 `u8"\uF015  Dashboard"`）。
 - EUI 会把图标和文本拆开分别渲染，垂直居中会稳定很多。
 - 想看完整的极简侧边栏 + 页面切换示例，可直接参考 `examples/sidebar_navigation_demo.cpp`。
+- 想看同一窗口里同时出现多个滚动条的示例，可直接参考 `examples/multi_scrollbars_demo.cpp`。
 
 ```cpp
 // 左对齐侧边栏项：图标 + 文本，垂直居中更稳定
