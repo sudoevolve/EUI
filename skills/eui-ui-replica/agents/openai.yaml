@@ -1,0 +1,4 @@
+interface:
+  display_name: "EUI UI Replica"
+  short_description: "Recreate high-fidelity interactive EUI screens from images with motion, blur, overlays, and preflight error checks."
+  default_prompt: "Use $eui-ui-replica to recreate this reference image as a fully interactive EUI example with correct layering, motion, and input behavior."

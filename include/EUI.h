@@ -1011,7 +1011,8 @@ private:
     }
 
     bool internal_input_text(std::string_view label, std::string& value, float height = 34.0f,
-                             std::string_view placeholder = {}, bool align_right = false) {
+                             std::string_view placeholder = {}, bool align_right = false,
+                             float leading_padding = 0.0f) {
         const std::string before = value;
         const float probe_label_font = std::clamp(std::max(2.0f, height) * 0.40f, 13.0f, 24.0f);
         const float probe_value_font = std::max(12.0f, probe_label_font - 0.5f);
@@ -1022,6 +1023,7 @@ private:
         const float label_font = std::clamp(rect.h * 0.40f, 13.0f, 24.0f);
         const float value_font = std::max(12.0f, label_font - 0.5f);
         const float input_padding = std::clamp(rect.h * 0.18f, 6.0f, 12.0f);
+        const float content_padding = input_padding + std::max(0.0f, leading_padding);
         const bool has_label = !label.empty();
         const Rect label_rect{
             rect.x,
@@ -1056,7 +1058,7 @@ private:
 
         bool editing = is_text_input_active(id);
         if (editing) {
-            update_mouse_selection(input_rect, value_font, align_right, input_padding, hovered);
+            update_mouse_selection(input_rect, value_font, align_right, content_padding, hovered);
             consume_plain_typing(false);
             if (input_buffer_.size() > 256u) {
                 input_buffer_.resize(256u);
@@ -1077,13 +1079,13 @@ private:
                           theme_.input_bg, theme_.radius - 2.0f, editing ? 1.2f : 1.0f);
 
         if (editing) {
-            draw_text_input_content(input_rect, value_font, align_right, input_padding, theme_.text,
+            draw_text_input_content(input_rect, value_font, align_right, content_padding, theme_.text,
                                     mix(theme_.primary, theme_.input_bg, 0.55f));
         } else if (value.empty() && !placeholder.empty()) {
-            draw_static_input_content(input_rect, placeholder, value_font, align_right, input_padding,
+            draw_static_input_content(input_rect, placeholder, value_font, align_right, content_padding,
                                       theme_.muted_text);
         } else {
-            draw_static_input_content(input_rect, value, value_font, align_right, input_padding, theme_.text);
+            draw_static_input_content(input_rect, value, value_font, align_right, content_padding, theme_.text);
         }
 
         return value != before;

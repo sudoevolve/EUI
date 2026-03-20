@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -134,8 +136,8 @@ struct ContextAccess {
     }
 
     static bool input_text(Context& ctx, std::string_view label, std::string& value, float height,
-                           std::string_view placeholder, bool align_right) {
-        return ctx.internal_input_text(label, value, height, placeholder, align_right);
+                           std::string_view placeholder, bool align_right, float leading_padding = 0.0f) {
+        return ctx.internal_input_text(label, value, height, placeholder, align_right, leading_padding);
     }
 
     static void input_readonly(Context& ctx, std::string_view label, std::string_view value, float height,
@@ -215,6 +217,14 @@ class DropdownBuilder;
 class ScrollAreaBuilder;
 class MetricBuilder;
 class RowBuilder;
+class ViewScope;
+class ViewBuilder;
+class LinearLayoutScope;
+class LinearLayoutBuilder;
+class GridLayoutScope;
+class GridLayoutBuilder;
+class StackLayoutScope;
+class StackLayoutBuilder;
 
 inline Color rgb(std::uint32_t hex, float alpha = 1.0f) {
     const float inv = 1.0f / 255.0f;
@@ -259,6 +269,61 @@ inline float ease_out_cubic(float t) {
     t = std::clamp(t, 0.0f, 1.0f);
     const float inv = 1.0f - t;
     return 1.0f - inv * inv * inv;
+}
+
+template <typename T>
+class Binding {
+public:
+    Binding() = default;
+
+    explicit Binding(std::function<T()> resolver)
+        : resolver_(std::move(resolver)) {}
+
+    T get() const {
+        return resolver_ ? resolver_() : T{};
+    }
+
+private:
+    std::function<T()> resolver_{};
+};
+
+template <typename Fn, typename Result = std::invoke_result_t<Fn&>,
+          typename = std::enable_if_t<std::is_invocable_v<Fn&>>>
+Binding<std::decay_t<Result>> bind(Fn&& resolver) {
+    using Value = std::decay_t<Result>;
+    return Binding<Value>([fn = std::forward<Fn>(resolver)]() mutable -> Value {
+        return static_cast<Value>(fn());
+    });
+}
+
+template <typename T, typename = std::enable_if_t<!std::is_invocable_v<T&>>, typename = void>
+Binding<std::decay_t<T>> bind(T&& value) {
+    using Value = std::decay_t<T>;
+    return Binding<Value>([stored = Value(std::forward<T>(value))]() -> Value {
+        return stored;
+    });
+}
+
+template <typename T>
+T resolve(const Binding<T>& binding) {
+    return binding.get();
+}
+
+template <typename T>
+T resolve(const T& value) {
+    return value;
+}
+
+inline FlexLength px(float value) {
+    return Fixed(value);
+}
+
+inline FlexLength fr(float weight = 1.0f) {
+    return Flex(weight);
+}
+
+inline FlexLength fit(float min_width = 0.0f, float max_width = 1000000.0f) {
+    return Content(min_width, max_width);
 }
 
 inline detail::ResolvedRect to_resolved_rect(const Rect& rect) {
@@ -522,7 +587,12 @@ public:
     DropdownBuilder dropdown(std::string_view label, bool& open);
     ScrollAreaBuilder scroll_area(std::string_view label);
     MetricBuilder metric(std::string_view label, std::string_view value);
+    ViewBuilder view(const Rect& rect);
     RowBuilder row();
+    LinearLayoutBuilder row(const Rect& rect);
+    LinearLayoutBuilder column(const Rect& rect);
+    GridLayoutBuilder grid(const Rect& rect);
+    StackLayoutBuilder zstack(const Rect& rect);
     AnchorBuilder anchor();
 
     Rect paint(const eui::graphics::RectanglePrimitive& primitive) {
@@ -1104,6 +1174,10 @@ public:
         return self();
     }
 
+    Derived& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
     Derived& at(float x, float y) {
         placement_.has_pos = true;
         placement_.x = x;
@@ -1111,11 +1185,19 @@ public:
         return self();
     }
 
+    Derived& at(const Binding<float>& x, const Binding<float>& y) {
+        return at(x.get(), y.get());
+    }
+
     Derived& size(float w, float h) {
         placement_.has_size = true;
         placement_.w = std::max(0.0f, w);
         placement_.h = std::max(0.0f, h);
         return self();
+    }
+
+    Derived& size(const Binding<float>& w, const Binding<float>& h) {
+        return size(w.get(), h.get());
     }
 
     Derived& fill_parent() {
@@ -1193,6 +1275,10 @@ public:
     Derived& opacity(float opacity) {
         primitive_.opacity = std::clamp(opacity, 0.0f, 1.0f);
         return self();
+    }
+
+    Derived& opacity(const Binding<float>& opacity) {
+        return this->opacity(opacity.get());
     }
 
     Derived& alpha(float alpha) {
@@ -1841,9 +1927,17 @@ public:
         return *this;
     }
 
+    SurfaceBuilder& padding(const Binding<float>& padding) {
+        return this->padding(padding.get());
+    }
+
     SurfaceBuilder& radius(float radius) {
         radius_ = std::max(0.0f, radius);
         return *this;
+    }
+
+    SurfaceBuilder& radius(const Binding<float>& radius) {
+        return this->radius(radius.get());
     }
 
     SurfaceBuilder& fill(const Color& color) {
@@ -1872,6 +1966,10 @@ public:
     SurfaceBuilder& alpha(float alpha) {
         alpha_ = std::clamp(alpha, 0.0f, 1.0f);
         return *this;
+    }
+
+    SurfaceBuilder& alpha(const Binding<float>& alpha) {
+        return this->alpha(alpha.get());
     }
 
     SurfaceBuilder& stroke(const Color& color, float width = 1.0f) {
@@ -1913,6 +2011,10 @@ public:
     SurfaceBuilder& title_font(float font_size) {
         title_font_ = std::max(8.0f, font_size);
         return *this;
+    }
+
+    SurfaceBuilder& title_font(const Binding<float>& font_size) {
+        return this->title_font(font_size.get());
     }
 
     SurfaceBuilder& title_color(const Color& color) {
@@ -1993,6 +2095,10 @@ public:
         return *this;
     }
 
+    LabelBuilder& font(const Binding<float>& font_size) {
+        return this->font(font_size.get());
+    }
+
     LabelBuilder& muted(bool muted = true) {
         muted_ = muted;
         return *this;
@@ -2001,6 +2107,10 @@ public:
     LabelBuilder& height(float height) {
         height_ = std::max(0.0f, height);
         return *this;
+    }
+
+    LabelBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
     }
 
     void draw() {
@@ -2020,6 +2130,16 @@ class ButtonBuilder {
 public:
     ButtonBuilder(UI& ui, std::string_view label)
         : ui_(ui), label_(label) {}
+
+    ButtonBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    ButtonBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
 
     ButtonBuilder& style(ButtonStyle style) {
         style_ = style;
@@ -2046,23 +2166,41 @@ public:
         return *this;
     }
 
+    ButtonBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
+    }
+
     ButtonBuilder& text_scale(float text_scale) {
         text_scale_ = std::clamp(text_scale, 0.6f, 2.0f);
         return *this;
     }
 
+    ButtonBuilder& text_scale(const Binding<float>& text_scale) {
+        return this->text_scale(text_scale.get());
+    }
+
     bool draw() {
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            return draw_impl();
+        }
+        return draw_impl();
+    }
+
+private:
+    bool draw_impl() {
         const bool clicked = detail::ContextAccess::button(ui_.ctx(), label_, style_, height_, text_scale_);
         ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
         return clicked;
     }
-
-private:
     UI& ui_;
     std::string label_{};
     ButtonStyle style_{ButtonStyle::Secondary};
     float height_{34.0f};
     float text_scale_{1.0f};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class TabBuilder {
@@ -2070,9 +2208,23 @@ public:
     TabBuilder(UI& ui, std::string_view label, bool selected = false)
         : ui_(ui), label_(label), selected_(selected) {}
 
+    TabBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    TabBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
     TabBuilder& selected(bool selected = true) {
         selected_ = selected;
         return *this;
+    }
+
+    TabBuilder& selected(const Binding<bool>& selected) {
+        return this->selected(selected.get());
     }
 
     TabBuilder& height(float height) {
@@ -2080,17 +2232,31 @@ public:
         return *this;
     }
 
+    TabBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
+    }
+
     bool draw() {
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            return draw_impl();
+        }
+        return draw_impl();
+    }
+
+private:
+    bool draw_impl() {
         const bool clicked = detail::ContextAccess::tab(ui_.ctx(), label_, selected_, height_);
         ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
         return clicked;
     }
-
-private:
     UI& ui_;
     std::string label_{};
     bool selected_{false};
     float height_{30.0f};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class SliderFloatBuilder {
@@ -2098,10 +2264,24 @@ public:
     SliderFloatBuilder(UI& ui, std::string_view label, float& value)
         : ui_(ui), label_(label), value_(value) {}
 
+    SliderFloatBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    SliderFloatBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
     SliderFloatBuilder& range(float min_value, float max_value) {
         min_value_ = min_value;
         max_value_ = max_value;
         return *this;
+    }
+
+    SliderFloatBuilder& range(const Binding<float>& min_value, const Binding<float>& max_value) {
+        return this->range(min_value.get(), max_value.get());
     }
 
     SliderFloatBuilder& min(float min_value) {
@@ -2124,14 +2304,26 @@ public:
         return *this;
     }
 
+    SliderFloatBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
+    }
+
     bool draw() {
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            return draw_impl();
+        }
+        return draw_impl();
+    }
+
+private:
+    bool draw_impl() {
         const bool changed = detail::ContextAccess::slider_float(
             ui_.ctx(), label_, value_, min_value_, max_value_, decimals_, height_);
         ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
         return changed;
     }
-
-private:
     UI& ui_;
     std::string label_{};
     float& value_;
@@ -2139,12 +2331,24 @@ private:
     float max_value_{1.0f};
     int decimals_{-1};
     float height_{40.0f};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class InputBuilder {
 public:
     InputBuilder(UI& ui, std::string_view label, std::string& value)
         : ui_(ui), label_(label), value_(value) {}
+
+    InputBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    InputBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
 
     InputBuilder& label(std::string_view label) {
         label_ = std::string(label);
@@ -2161,25 +2365,50 @@ public:
         return *this;
     }
 
+    InputBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
+    }
+
     InputBuilder& align_right(bool align_right = true) {
         align_right_ = align_right;
         return *this;
     }
 
+    InputBuilder& padding_left(float padding) {
+        leading_padding_ = std::max(0.0f, padding);
+        return *this;
+    }
+
+    InputBuilder& padding_left(const Binding<float>& padding) {
+        return this->padding_left(padding.get());
+    }
+
     bool draw() {
-        const bool changed =
-            detail::ContextAccess::input_text(ui_.ctx(), label_, value_, height_, placeholder_, align_right_);
-        ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
-        return changed;
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            return draw_impl();
+        }
+        return draw_impl();
     }
 
 private:
+    bool draw_impl() {
+        const bool changed =
+            detail::ContextAccess::input_text(ui_.ctx(), label_, value_, height_, placeholder_, align_right_,
+                                              leading_padding_);
+        ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
+        return changed;
+    }
     UI& ui_;
     std::string label_{};
     std::string& value_;
     std::string placeholder_{};
     float height_{34.0f};
     bool align_right_{false};
+    float leading_padding_{0.0f};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class FloatInputBuilder {
@@ -2187,10 +2416,24 @@ public:
     FloatInputBuilder(UI& ui, std::string_view label, float& value)
         : ui_(ui), label_(label), value_(value) {}
 
+    FloatInputBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    FloatInputBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
     FloatInputBuilder& range(float min_value, float max_value) {
         min_value_ = min_value;
         max_value_ = max_value;
         return *this;
+    }
+
+    FloatInputBuilder& range(const Binding<float>& min_value, const Binding<float>& max_value) {
+        return this->range(min_value.get(), max_value.get());
     }
 
     FloatInputBuilder& min(float min_value) {
@@ -2213,14 +2456,26 @@ public:
         return *this;
     }
 
+    FloatInputBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
+    }
+
     bool draw() {
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            return draw_impl();
+        }
+        return draw_impl();
+    }
+
+private:
+    bool draw_impl() {
         const bool changed = detail::ContextAccess::input_float(
             ui_.ctx(), label_, value_, min_value_, max_value_, decimals_, height_);
         ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
         return changed;
     }
-
-private:
     UI& ui_;
     std::string label_{};
     float& value_;
@@ -2228,6 +2483,8 @@ private:
     float max_value_{1.0f};
     int decimals_{2};
     float height_{34.0f};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class ReadonlyBuilder {
@@ -2235,9 +2492,23 @@ public:
     ReadonlyBuilder(UI& ui, std::string_view label, std::string_view value)
         : ui_(ui), label_(label), value_(value) {}
 
+    ReadonlyBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    ReadonlyBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
     ReadonlyBuilder& height(float height) {
         height_ = std::max(18.0f, height);
         return *this;
+    }
+
+    ReadonlyBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
     }
 
     ReadonlyBuilder& align_right(bool align_right = true) {
@@ -2250,17 +2521,30 @@ public:
         return *this;
     }
 
+    ReadonlyBuilder& value_scale(const Binding<float>& value_scale) {
+        return this->value_scale(value_scale.get());
+    }
+
     ReadonlyBuilder& muted(bool muted = true) {
         muted_ = muted;
         return *this;
     }
 
     void draw() {
-        detail::ContextAccess::input_readonly(ui_.ctx(), label_, value_, height_, align_right_, value_scale_, muted_);
-        ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            draw_impl();
+            return;
+        }
+        draw_impl();
     }
 
 private:
+    void draw_impl() {
+        detail::ContextAccess::input_readonly(ui_.ctx(), label_, value_, height_, align_right_, value_scale_, muted_);
+        ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
+    }
     UI& ui_;
     std::string label_{};
     std::string value_{};
@@ -2268,6 +2552,8 @@ private:
     bool align_right_{false};
     float value_scale_{1.0f};
     bool muted_{true};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class ProgressBuilder {
@@ -2275,9 +2561,23 @@ public:
     ProgressBuilder(UI& ui, std::string_view label, float ratio)
         : ui_(ui), label_(label), ratio_(ratio) {}
 
+    ProgressBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    ProgressBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
     ProgressBuilder& height(float height) {
         height_ = std::max(4.0f, height);
         return *this;
+    }
+
+    ProgressBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
     }
 
     ProgressBuilder& ratio(float ratio) {
@@ -2285,16 +2585,31 @@ public:
         return *this;
     }
 
+    ProgressBuilder& ratio(const Binding<float>& ratio) {
+        return this->ratio(ratio.get());
+    }
+
     void draw() {
-        detail::ContextAccess::progress(ui_.ctx(), label_, std::clamp(ratio_, 0.0f, 1.0f), height_);
-        ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            draw_impl();
+            return;
+        }
+        draw_impl();
     }
 
 private:
+    void draw_impl() {
+        detail::ContextAccess::progress(ui_.ctx(), label_, std::clamp(ratio_, 0.0f, 1.0f), height_);
+        ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
+    }
     UI& ui_;
     std::string label_{};
     float ratio_{0.0f};
     float height_{10.0f};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class TextAreaBuilder {
@@ -2302,22 +2617,46 @@ public:
     TextAreaBuilder(UI& ui, std::string_view label, std::string& text)
         : ui_(ui), label_(label), text_(text) {}
 
+    TextAreaBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    TextAreaBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
     TextAreaBuilder& height(float height) {
         height_ = std::max(48.0f, height);
         return *this;
     }
 
+    TextAreaBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
+    }
+
     bool draw() {
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            return draw_impl();
+        }
+        return draw_impl();
+    }
+
+private:
+    bool draw_impl() {
         const bool changed = detail::ContextAccess::text_area(ui_.ctx(), label_, text_, height_);
         ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
         return changed;
     }
-
-private:
     UI& ui_;
     std::string label_{};
     std::string& text_;
     float height_{170.0f};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class TextAreaReadonlyBuilder {
@@ -2325,21 +2664,46 @@ public:
     TextAreaReadonlyBuilder(UI& ui, std::string_view label, std::string_view text)
         : ui_(ui), label_(label), text_(text) {}
 
+    TextAreaReadonlyBuilder& in(const Rect& rect) {
+        has_rect_ = true;
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    TextAreaReadonlyBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
     TextAreaReadonlyBuilder& height(float height) {
         height_ = std::max(48.0f, height);
         return *this;
     }
 
+    TextAreaReadonlyBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
+    }
+
     void draw() {
-        detail::ContextAccess::text_area_readonly(ui_.ctx(), label_, text_, height_);
-        ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
+        if (has_rect_) {
+            auto scope = ui_.scope(rect_);
+            static_cast<void>(scope);
+            draw_impl();
+            return;
+        }
+        draw_impl();
     }
 
 private:
+    void draw_impl() {
+        detail::ContextAccess::text_area_readonly(ui_.ctx(), label_, text_, height_);
+        ui_.remember(detail::ContextAccess::last_item_rect(ui_.ctx()));
+    }
     UI& ui_;
     std::string label_{};
     std::string text_{};
     float height_{170.0f};
+    bool has_rect_{false};
+    Rect rect_{};
 };
 
 class DropdownBuilder {
@@ -2352,9 +2716,17 @@ public:
         return *this;
     }
 
+    DropdownBuilder& body_height(const Binding<float>& height) {
+        return this->body_height(height.get());
+    }
+
     DropdownBuilder& padding(float padding) {
         padding_ = std::max(0.0f, padding);
         return *this;
+    }
+
+    DropdownBuilder& padding(const Binding<float>& padding) {
+        return this->padding(padding.get());
     }
 
     DropdownScope begin() {
@@ -2390,9 +2762,17 @@ public:
         return *this;
     }
 
+    ScrollAreaBuilder& height(const Binding<float>& height) {
+        return this->height(height.get());
+    }
+
     ScrollAreaBuilder& padding(float padding) {
         options_.padding = padding;
         return *this;
+    }
+
+    ScrollAreaBuilder& padding(const Binding<float>& padding) {
+        return this->padding(padding.get());
     }
 
     ScrollAreaBuilder& scrollbar_width(float width) {
@@ -2691,6 +3071,10 @@ public:
         return *this;
     }
 
+    RowBuilder& gap(const Binding<float>& gap) {
+        return this->gap(gap.get());
+    }
+
     RowBuilder& align(FlexAlign align) {
         align_ = align;
         return *this;
@@ -2731,6 +3115,556 @@ private:
     std::vector<FlexLength> items_{};
     float gap_{8.0f};
     FlexAlign align_{FlexAlign::Top};
+};
+
+namespace detail {
+
+inline std::vector<float> resolve_tracks(const std::vector<FlexLength>& tracks, float available) {
+    std::vector<float> sizes(tracks.size(), 0.0f);
+    float fixed_total = 0.0f;
+    float total_flex = 0.0f;
+    for (std::size_t i = 0; i < tracks.size(); ++i) {
+        const FlexLength& track = tracks[i];
+        switch (track.kind) {
+            case FlexLength::Kind::Fixed:
+                sizes[i] = std::max(0.0f, track.value);
+                fixed_total += sizes[i];
+                break;
+            case FlexLength::Kind::Content:
+                sizes[i] = std::clamp(track.value, 0.0f, track.max_value);
+                fixed_total += sizes[i];
+                break;
+            case FlexLength::Kind::Flex:
+            default:
+                total_flex += std::max(0.0f, track.value);
+                break;
+        }
+    }
+
+    const float remaining = std::max(0.0f, available - fixed_total);
+    if (total_flex > 0.0f) {
+        for (std::size_t i = 0; i < tracks.size(); ++i) {
+            const FlexLength& track = tracks[i];
+            if (track.kind == FlexLength::Kind::Flex) {
+                sizes[i] = remaining * (std::max(0.0f, track.value) / total_flex);
+            }
+        }
+    }
+
+    float used = 0.0f;
+    for (float size : sizes) {
+        used += size;
+    }
+    if (used > available && used > 0.0f) {
+        const float scale = available / used;
+        for (float& size : sizes) {
+            size *= scale;
+        }
+    }
+    return sizes;
+}
+
+}  // namespace detail
+
+class ViewScope;
+
+class LinearLayoutScope {
+public:
+    LinearLayoutScope() = default;
+
+    LinearLayoutScope(UI* ui, const Rect& content_rect, std::vector<Rect> slots)
+        : ui_(ui), content_rect_(content_rect), slots_(std::move(slots)) {}
+
+    bool active() const {
+        return ui_ != nullptr;
+    }
+
+    Rect content() const {
+        return content_rect_;
+    }
+
+    std::size_t count() const {
+        return slots_.size();
+    }
+
+    Rect slot(std::size_t index) const {
+        return index < slots_.size() ? slots_[index] : Rect{};
+    }
+
+    Rect next() {
+        if (cursor_ >= slots_.size()) {
+            return Rect{};
+        }
+        const Rect rect = slots_[cursor_++];
+        if (ui_ != nullptr) {
+            ui_->remember(rect);
+        }
+        return rect;
+    }
+
+    void reset() {
+        cursor_ = 0u;
+    }
+
+    template <typename Fn>
+    void next(Fn&& fn);
+
+private:
+    UI* ui_{nullptr};
+    Rect content_rect_{};
+    std::vector<Rect> slots_{};
+    std::size_t cursor_{0u};
+};
+
+class LinearLayoutBuilder {
+public:
+    LinearLayoutBuilder(UI& ui, const Rect& rect, bool vertical)
+        : ui_(ui), rect_(make_rect(rect.x, rect.y, rect.w, rect.h)), vertical_(vertical) {}
+
+    LinearLayoutBuilder& in(const Rect& rect) {
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    LinearLayoutBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
+    LinearLayoutBuilder& padding(float padding) {
+        return padding_xy(padding, padding);
+    }
+
+    LinearLayoutBuilder& padding(const Binding<float>& padding) {
+        return this->padding(padding.get());
+    }
+
+    LinearLayoutBuilder& padding_xy(float horizontal, float vertical) {
+        padding_x_ = std::max(0.0f, horizontal);
+        padding_y_ = std::max(0.0f, vertical);
+        return *this;
+    }
+
+    LinearLayoutBuilder& gap(float gap) {
+        gap_ = std::max(0.0f, gap);
+        return *this;
+    }
+
+    LinearLayoutBuilder& gap(const Binding<float>& gap) {
+        return this->gap(gap.get());
+    }
+
+    LinearLayoutBuilder& items(std::initializer_list<FlexLength> items) {
+        items_.assign(items.begin(), items.end());
+        return *this;
+    }
+
+    LinearLayoutBuilder& items(const std::vector<FlexLength>& items) {
+        items_ = items;
+        return *this;
+    }
+
+    LinearLayoutBuilder& tracks(std::initializer_list<FlexLength> items) {
+        return this->items(items);
+    }
+
+    LinearLayoutBuilder& tracks(const std::vector<FlexLength>& items) {
+        return this->items(items);
+    }
+
+    LinearLayoutBuilder& repeat(std::size_t count, FlexLength track = FlexLength::Flex(1.0f)) {
+        items_.assign(count, track);
+        return *this;
+    }
+
+    LinearLayoutScope begin() const {
+        std::vector<FlexLength> tracks = items_;
+        if (tracks.empty()) {
+            tracks.push_back(FlexLength::Flex(1.0f));
+        }
+
+        const Rect inner = inset(rect_, padding_x_, padding_y_);
+        const std::size_t count = tracks.size();
+        const float total_gap = (count > 1u) ? gap_ * static_cast<float>(count - 1u) : 0.0f;
+        const float primary_available = std::max(0.0f, (vertical_ ? inner.h : inner.w) - total_gap);
+        const std::vector<float> primary_sizes = detail::resolve_tracks(tracks, primary_available);
+
+        std::vector<Rect> slots;
+        slots.reserve(count);
+        float cursor = vertical_ ? inner.y : inner.x;
+        for (std::size_t i = 0; i < count; ++i) {
+            const Rect cell = vertical_
+                                  ? make_rect(inner.x, cursor, inner.w, primary_sizes[i])
+                                  : make_rect(cursor, inner.y, primary_sizes[i], inner.h);
+            slots.push_back(cell);
+            cursor += primary_sizes[i] + gap_;
+        }
+        return LinearLayoutScope(&ui_, inner, std::move(slots));
+    }
+
+    template <typename Fn>
+    void begin(Fn&& fn) const {
+        auto scope = begin();
+        fn(scope);
+    }
+
+private:
+    UI& ui_;
+    Rect rect_{};
+    float padding_x_{0.0f};
+    float padding_y_{0.0f};
+    float gap_{0.0f};
+    std::vector<FlexLength> items_{};
+    bool vertical_{false};
+};
+
+class GridLayoutScope {
+public:
+    GridLayoutScope() = default;
+
+    GridLayoutScope(UI* ui, const Rect& content_rect, std::size_t rows, std::size_t columns, std::vector<Rect> cells)
+        : ui_(ui), content_rect_(content_rect), rows_(rows), columns_(columns), cells_(std::move(cells)) {}
+
+    bool active() const {
+        return ui_ != nullptr;
+    }
+
+    Rect content() const {
+        return content_rect_;
+    }
+
+    std::size_t row_count() const {
+        return rows_;
+    }
+
+    std::size_t column_count() const {
+        return columns_;
+    }
+
+    Rect cell(std::size_t row, std::size_t column) const {
+        const std::size_t index = row * columns_ + column;
+        return index < cells_.size() ? cells_[index] : Rect{};
+    }
+
+    Rect next() {
+        if (cursor_ >= cells_.size()) {
+            return Rect{};
+        }
+        const Rect rect = cells_[cursor_++];
+        if (ui_ != nullptr) {
+            ui_->remember(rect);
+        }
+        return rect;
+    }
+
+    void reset() {
+        cursor_ = 0u;
+    }
+
+    template <typename Fn>
+    void next(Fn&& fn);
+
+private:
+    UI* ui_{nullptr};
+    Rect content_rect_{};
+    std::size_t rows_{0u};
+    std::size_t columns_{0u};
+    std::vector<Rect> cells_{};
+    std::size_t cursor_{0u};
+};
+
+class GridLayoutBuilder {
+public:
+    GridLayoutBuilder(UI& ui, const Rect& rect)
+        : ui_(ui), rect_(make_rect(rect.x, rect.y, rect.w, rect.h)) {}
+
+    GridLayoutBuilder& in(const Rect& rect) {
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    GridLayoutBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
+    GridLayoutBuilder& padding(float padding) {
+        return padding_xy(padding, padding);
+    }
+
+    GridLayoutBuilder& padding(const Binding<float>& padding) {
+        return this->padding(padding.get());
+    }
+
+    GridLayoutBuilder& padding_xy(float horizontal, float vertical) {
+        padding_x_ = std::max(0.0f, horizontal);
+        padding_y_ = std::max(0.0f, vertical);
+        return *this;
+    }
+
+    GridLayoutBuilder& gap(float gap) {
+        gap_x_ = std::max(0.0f, gap);
+        gap_y_ = std::max(0.0f, gap);
+        return *this;
+    }
+
+    GridLayoutBuilder& gap(const Binding<float>& gap) {
+        return this->gap(gap.get());
+    }
+
+    GridLayoutBuilder& gap_x(float gap) {
+        gap_x_ = std::max(0.0f, gap);
+        return *this;
+    }
+
+    GridLayoutBuilder& gap_y(float gap) {
+        gap_y_ = std::max(0.0f, gap);
+        return *this;
+    }
+
+    GridLayoutBuilder& columns(std::initializer_list<FlexLength> columns) {
+        columns_.assign(columns.begin(), columns.end());
+        return *this;
+    }
+
+    GridLayoutBuilder& rows(std::initializer_list<FlexLength> rows) {
+        rows_.assign(rows.begin(), rows.end());
+        return *this;
+    }
+
+    GridLayoutBuilder& columns(const std::vector<FlexLength>& columns) {
+        columns_ = columns;
+        return *this;
+    }
+
+    GridLayoutBuilder& rows(const std::vector<FlexLength>& rows) {
+        rows_ = rows;
+        return *this;
+    }
+
+    GridLayoutBuilder& repeat_columns(std::size_t count, FlexLength track = FlexLength::Flex(1.0f)) {
+        columns_.assign(count, track);
+        return *this;
+    }
+
+    GridLayoutBuilder& repeat_rows(std::size_t count, FlexLength track = FlexLength::Flex(1.0f)) {
+        rows_.assign(count, track);
+        return *this;
+    }
+
+    GridLayoutScope begin() const {
+        std::vector<FlexLength> cols = columns_;
+        std::vector<FlexLength> rows = rows_;
+        if (cols.empty()) {
+            cols.push_back(FlexLength::Flex(1.0f));
+        }
+        if (rows.empty()) {
+            rows.push_back(FlexLength::Flex(1.0f));
+        }
+
+        const Rect inner = inset(rect_, padding_x_, padding_y_);
+        const float avail_w = std::max(0.0f, inner.w - gap_x_ * static_cast<float>(cols.size() > 0 ? cols.size() - 1 : 0));
+        const float avail_h = std::max(0.0f, inner.h - gap_y_ * static_cast<float>(rows.size() > 0 ? rows.size() - 1 : 0));
+        const std::vector<float> col_sizes = detail::resolve_tracks(cols, avail_w);
+        const std::vector<float> row_sizes = detail::resolve_tracks(rows, avail_h);
+
+        std::vector<float> xs(cols.size(), inner.x);
+        std::vector<float> ys(rows.size(), inner.y);
+        for (std::size_t i = 1; i < cols.size(); ++i) {
+            xs[i] = xs[i - 1] + col_sizes[i - 1] + gap_x_;
+        }
+        for (std::size_t i = 1; i < rows.size(); ++i) {
+            ys[i] = ys[i - 1] + row_sizes[i - 1] + gap_y_;
+        }
+
+        std::vector<Rect> cells;
+        cells.reserve(rows.size() * cols.size());
+        for (std::size_t row = 0; row < rows.size(); ++row) {
+            for (std::size_t col = 0; col < cols.size(); ++col) {
+                cells.push_back(make_rect(xs[col], ys[row], col_sizes[col], row_sizes[row]));
+            }
+        }
+        return GridLayoutScope(&ui_, inner, rows.size(), cols.size(), std::move(cells));
+    }
+
+    template <typename Fn>
+    void begin(Fn&& fn) const {
+        auto scope = begin();
+        fn(scope);
+    }
+
+private:
+    UI& ui_;
+    Rect rect_{};
+    float padding_x_{0.0f};
+    float padding_y_{0.0f};
+    float gap_x_{0.0f};
+    float gap_y_{0.0f};
+    std::vector<FlexLength> columns_{};
+    std::vector<FlexLength> rows_{};
+};
+
+class StackLayoutScope {
+public:
+    StackLayoutScope() = default;
+
+    StackLayoutScope(UI* ui, const Rect& rect, std::size_t layers)
+        : ui_(ui), rect_(rect), layers_(layers) {}
+
+    Rect content() const {
+        return rect_;
+    }
+
+    std::size_t count() const {
+        return layers_;
+    }
+
+    Rect next() {
+        if (cursor_ >= layers_) {
+            return Rect{};
+        }
+        ++cursor_;
+        if (ui_ != nullptr) {
+            ui_->remember(rect_);
+        }
+        return rect_;
+    }
+
+    template <typename Fn>
+    void next(Fn&& fn);
+
+private:
+    UI* ui_{nullptr};
+    Rect rect_{};
+    std::size_t layers_{0u};
+    std::size_t cursor_{0u};
+};
+
+class StackLayoutBuilder {
+public:
+    StackLayoutBuilder(UI& ui, const Rect& rect)
+        : ui_(ui), rect_(make_rect(rect.x, rect.y, rect.w, rect.h)) {}
+
+    StackLayoutBuilder& in(const Rect& rect) {
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    StackLayoutBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
+    StackLayoutBuilder& padding(float padding) {
+        return padding_xy(padding, padding);
+    }
+
+    StackLayoutBuilder& padding_xy(float horizontal, float vertical) {
+        padding_x_ = std::max(0.0f, horizontal);
+        padding_y_ = std::max(0.0f, vertical);
+        return *this;
+    }
+
+    StackLayoutBuilder& layers(std::size_t count) {
+        layer_count_ = std::max<std::size_t>(1u, count);
+        return *this;
+    }
+
+    StackLayoutScope begin() const {
+        return StackLayoutScope(&ui_, inset(rect_, padding_x_, padding_y_), layer_count_);
+    }
+
+    template <typename Fn>
+    void begin(Fn&& fn) const {
+        auto scope = begin();
+        fn(scope);
+    }
+
+private:
+    UI& ui_;
+    Rect rect_{};
+    float padding_x_{0.0f};
+    float padding_y_{0.0f};
+    std::size_t layer_count_{1u};
+};
+
+class ViewScope {
+public:
+    ViewScope() = default;
+
+    ViewScope(UI* ui, RegionScope region)
+        : ui_(ui), region_(std::move(region)) {}
+
+    bool active() const {
+        return region_.active();
+    }
+
+    Rect content() const {
+        return region_.content();
+    }
+
+    LinearLayoutBuilder row() const;
+    LinearLayoutBuilder column() const;
+    GridLayoutBuilder grid() const;
+    StackLayoutBuilder zstack() const;
+
+private:
+    UI* ui_{nullptr};
+    RegionScope region_{};
+};
+
+class ViewBuilder {
+public:
+    ViewBuilder(UI& ui, const Rect& rect)
+        : ui_(ui), rect_(make_rect(rect.x, rect.y, rect.w, rect.h)) {}
+
+    ViewBuilder& in(const Rect& rect) {
+        rect_ = make_rect(rect.x, rect.y, rect.w, rect.h);
+        return *this;
+    }
+
+    ViewBuilder& in(const Binding<Rect>& rect) {
+        return in(rect.get());
+    }
+
+    ViewBuilder& padding(float padding) {
+        return padding_xy(padding, padding);
+    }
+
+    ViewBuilder& padding_xy(float horizontal, float vertical) {
+        padding_x_ = std::max(0.0f, horizontal);
+        padding_y_ = std::max(0.0f, vertical);
+        return *this;
+    }
+
+    LinearLayoutBuilder row() const {
+        return LinearLayoutBuilder(ui_, inset(rect_, padding_x_, padding_y_), false);
+    }
+
+    LinearLayoutBuilder column() const {
+        return LinearLayoutBuilder(ui_, inset(rect_, padding_x_, padding_y_), true);
+    }
+
+    GridLayoutBuilder grid() const {
+        return GridLayoutBuilder(ui_, inset(rect_, padding_x_, padding_y_));
+    }
+
+    StackLayoutBuilder zstack() const {
+        return StackLayoutBuilder(ui_, inset(rect_, padding_x_, padding_y_));
+    }
+
+    ViewScope begin() {
+        return ViewScope(&ui_, ui_.scope(inset(rect_, padding_x_, padding_y_)));
+    }
+
+    template <typename Fn>
+    void begin(Fn&& fn) {
+        auto scope = begin();
+        fn(scope);
+    }
+
+private:
+    UI& ui_;
+    Rect rect_{};
+    float padding_x_{0.0f};
+    float padding_y_{0.0f};
 };
 
 inline RectangleBuilder UI::rectangle() {
@@ -2827,12 +3761,75 @@ inline MetricBuilder UI::metric(std::string_view label, std::string_view value) 
     return MetricBuilder(*this, label, value);
 }
 
+inline ViewBuilder UI::view(const Rect& rect) {
+    return ViewBuilder(*this, rect);
+}
+
 inline RowBuilder UI::row() {
     return RowBuilder(*this);
 }
 
+inline LinearLayoutBuilder UI::row(const Rect& rect) {
+    return LinearLayoutBuilder(*this, rect, false);
+}
+
+inline LinearLayoutBuilder UI::column(const Rect& rect) {
+    return LinearLayoutBuilder(*this, rect, true);
+}
+
+inline GridLayoutBuilder UI::grid(const Rect& rect) {
+    return GridLayoutBuilder(*this, rect);
+}
+
+inline StackLayoutBuilder UI::zstack(const Rect& rect) {
+    return StackLayoutBuilder(*this, rect);
+}
+
 inline AnchorBuilder UI::anchor() {
     return AnchorBuilder(*this);
+}
+
+template <typename Fn>
+inline void LinearLayoutScope::next(Fn&& fn) {
+    if (ui_ == nullptr) {
+        return;
+    }
+    auto scoped_view = ui_->view(next());
+    scoped_view.begin(std::forward<Fn>(fn));
+}
+
+template <typename Fn>
+inline void GridLayoutScope::next(Fn&& fn) {
+    if (ui_ == nullptr) {
+        return;
+    }
+    auto scoped_view = ui_->view(next());
+    scoped_view.begin(std::forward<Fn>(fn));
+}
+
+template <typename Fn>
+inline void StackLayoutScope::next(Fn&& fn) {
+    if (ui_ == nullptr) {
+        return;
+    }
+    auto scoped_view = ui_->view(next());
+    scoped_view.begin(std::forward<Fn>(fn));
+}
+
+inline LinearLayoutBuilder ViewScope::row() const {
+    return ui_->row(content());
+}
+
+inline LinearLayoutBuilder ViewScope::column() const {
+    return ui_->column(content());
+}
+
+inline GridLayoutBuilder ViewScope::grid() const {
+    return ui_->grid(content());
+}
+
+inline StackLayoutBuilder ViewScope::zstack() const {
+    return ui_->zstack(content());
 }
 
 inline RegionScope UI::scope(const Rect& rect) {

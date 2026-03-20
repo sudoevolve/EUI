@@ -127,7 +127,7 @@ static constexpr std::array<DemoDescriptor, 9> kDemos{{
 static constexpr std::array<PageDescriptor, 7> kPages{{
     {"Basic Controls", "Buttons, sliders, inputs and text surfaces.", "buttons + inputs"},
     {"Design", "Typography, icon ids and palette tokens for fast UI work.", "fonts + icons + colors"},
-    {"Layout", "Split, dock and nested panel composition.", "layout primitives"},
+    {"Layout", "Declarative row, column, grid and stack composition.", "row() + column() + grid()"},
     {"Animation", "Motion lives here instead of in the main sidebar.", "motion showcase"},
     {"Dashboard Example", "A dashboard-style composition preview.", "dashboard preview"},
     {"Settings", "Theme mode, accent color and gallery tuning.", "theme + accent"},
@@ -871,226 +871,235 @@ void draw_design_page(UI& ui, const eui::InputState& input, GalleryState& state,
     const GalleryPalette palette = make_gallery_palette(state);
     const auto& library_icons = icon_library_entries();
     const float gap = 18.0f * scale;
-    const auto left_split = ui.split_h_ratio(rect, 0.33f, gap);
-    const auto mid_split = ui.split_h_ratio(left_split.second, 0.50f, gap);
-    const Rect typography_rect = left_split.first;
-    const Rect color_rect = mid_split.first;
-    const Rect icon_rect = mid_split.second;
 
-    ui.card("Typography")
-        .in(typography_rect)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto& card) {
-            struct TypeRow {
-                const char* name;
-                const char* usage;
-                const char* sample;
-                float size;
-            };
+    ui.row(rect)
+        .tracks({eui::quick::fr(1.05f), eui::quick::fr(), eui::quick::fr()})
+        .gap(gap)
+        .begin([&](auto& columns) {
+            const Rect typography_rect = columns.next();
+            const Rect color_rect = columns.next();
+            const Rect icon_rect = columns.next();
 
-            const std::array<TypeRow, 4> rows{{
-                {"font_display", "Page title / shell header", "Display Title", font_display(scale)},
-                {"font_heading", "Card / section heading", "Section Heading", font_heading(scale)},
-                {"font_body", "Navigation / readable text", "Readable Body", font_body(scale)},
-                {"font_meta", "Summary / caption / helper", "Meta Caption", font_meta(scale)},
-            }};
+            ui.card("Typography")
+                .in(typography_rect)
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    struct TypeRow {
+                        const char* name;
+                        const char* usage;
+                        const char* sample;
+                        float size;
+                    };
 
-            const float row_h = 72.0f * scale;
-            const float row_gap = 8.0f * scale;
-            const Rect code_rect = card.dock_bottom(92.0f * scale, 0.0f);
-            const Rect content = card.content();
-            float y = content.y;
-            for (const auto& row_info : rows) {
-                const Rect row{content.x, y, content.w, row_h};
-                draw_fill(ui, row, palette.surface_deep, 14.0f * scale, 0.94f);
-                draw_stroke(ui, row, palette.border_soft, 14.0f * scale, 1.0f, 0.86f);
-                draw_text_left(ui, row_info.name,
-                               Rect{row.x + 12.0f * scale, row.y + 8.0f * scale, row.w - 132.0f * scale, 18.0f * scale},
-                               font_body(scale), palette.text, 0.98f);
-                draw_text_right(ui, format_precise_pixels(row_info.size / std::max(1.0f, scale)),
-                                Rect{row.x + row.w - 120.0f * scale, row.y + 8.0f * scale, 108.0f * scale, 18.0f * scale},
-                                font_meta(scale), palette.muted, 0.98f);
-                draw_text_left(ui, row_info.usage,
-                               Rect{row.x + 12.0f * scale, row.y + 28.0f * scale, row.w - 24.0f * scale, 16.0f * scale},
-                               font_meta(scale), palette.muted, 0.96f);
-                draw_text_left(ui, row_info.sample,
-                               Rect{row.x + 12.0f * scale, row.y + 44.0f * scale, row.w - 24.0f * scale, 24.0f * scale},
-                               row_info.size, mix_hex(palette.text, palette.accent, 0.18f), 0.98f);
-                y += row_h + row_gap;
-            }
-            draw_fill(ui, code_rect, palette.surface_deep, 16.0f * scale, 0.92f);
-            draw_stroke(ui, code_rect, palette.border_soft, 16.0f * scale, 1.0f, 0.86f);
-            const std::array<std::string_view, 4> code_lines{{
-                "float font_display(float scale) { return 22.0f * scale; }",
-                "float font_heading(float scale) { return 16.0f * scale; }",
-                "float font_body(float scale) { return 14.0f * scale; }",
-                "float font_meta(float scale) { return 12.2f * scale; }",
-            }};
-            for (std::size_t i = 0; i < code_lines.size(); ++i) {
-                draw_text_left(ui, code_lines[i],
-                               Rect{code_rect.x + 12.0f * scale, code_rect.y + 10.0f * scale + static_cast<float>(i) * 20.0f * scale,
-                                    code_rect.w - 24.0f * scale, 18.0f * scale},
-                               font_meta(scale), palette.muted, 0.98f);
-            }
-        });
+                    const std::array<TypeRow, 4> rows{{
+                        {"font_display", "Page title / shell header", "Display Title", font_display(scale)},
+                        {"font_heading", "Card / section heading", "Section Heading", font_heading(scale)},
+                        {"font_body", "Navigation / readable text", "Readable Body", font_body(scale)},
+                        {"font_meta", "Summary / caption / helper", "Meta Caption", font_meta(scale)},
+                    }};
+                    const std::array<std::string_view, 4> code_lines{{
+                        "float font_display(float scale) { return 22.0f * scale; }",
+                        "float font_heading(float scale) { return 16.0f * scale; }",
+                        "float font_body(float scale) { return 14.0f * scale; }",
+                        "float font_meta(float scale) { return 12.2f * scale; }",
+                    }};
 
-    ui.card("Color System")
-        .in(color_rect)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto& card) {
-            const auto sections = ui.split_v_ratio(card.content(), 0.24f, 12.0f * scale);
-            const Rect accents = sections.first;
-            const Rect tokens_area = sections.second;
+                    ui.view(card.content())
+                        .column()
+                        .tracks({eui::quick::fr(), eui::quick::fr(), eui::quick::fr(), eui::quick::fr(), eui::quick::px(92.0f * scale)})
+                        .gap(8.0f * scale)
+                        .begin([&](auto& rows_scope) {
+                            for (const auto& row_info : rows) {
+                                const Rect row = rows_scope.next();
+                                draw_fill(ui, row, palette.surface_deep, 14.0f * scale, 0.94f);
+                                draw_stroke(ui, row, palette.border_soft, 14.0f * scale, 1.0f, 0.86f);
+                                draw_text_left(ui, row_info.name,
+                                               Rect{row.x + 12.0f * scale, row.y + 8.0f * scale, row.w - 132.0f * scale, 18.0f * scale},
+                                               font_body(scale), palette.text, 0.98f);
+                                draw_text_right(ui, format_precise_pixels(row_info.size / std::max(1.0f, scale)),
+                                                Rect{row.x + row.w - 120.0f * scale, row.y + 8.0f * scale, 108.0f * scale, 18.0f * scale},
+                                                font_meta(scale), palette.muted, 0.98f);
+                                draw_text_left(ui, row_info.usage,
+                                               Rect{row.x + 12.0f * scale, row.y + 28.0f * scale, row.w - 24.0f * scale, 16.0f * scale},
+                                               font_meta(scale), palette.muted, 0.96f);
+                                draw_text_left(ui, row_info.sample,
+                                               Rect{row.x + 12.0f * scale, row.y + 44.0f * scale, row.w - 24.0f * scale, 24.0f * scale},
+                                               row_info.size, mix_hex(palette.text, palette.accent, 0.18f), 0.98f);
+                            }
 
-            draw_fill(ui, accents, palette.surface_deep, 18.0f * scale, 0.92f);
-            draw_stroke(ui, accents, palette.border_soft, 18.0f * scale, 1.0f, 0.90f);
-            draw_text_left(ui, "Built-in Accent Presets",
-                           Rect{accents.x + 14.0f * scale, accents.y + 12.0f * scale, accents.w - 28.0f * scale, 18.0f * scale},
-                           font_body(scale), palette.text, 0.98f);
-            const float accent_gap = 10.0f * scale;
-            const float accent_tile_w = (accents.w - 48.0f * scale - accent_gap * 2.0f) / 3.0f;
-            const float accent_grid_y = accents.y + 42.0f * scale;
-            const float accent_available_h = std::max(42.0f * scale, accents.y + accents.h - accent_grid_y - 12.0f * scale);
-            const float accent_tile_h = std::max(34.0f * scale, (accent_available_h - accent_gap) * 0.5f);
-            for (std::size_t i = 0; i < kAccentHexes.size(); ++i) {
-                const int row = static_cast<int>(i) / 3;
-                const int col = static_cast<int>(i) % 3;
-                const Rect tile{
-                    accents.x + 14.0f * scale + static_cast<float>(col) * (accent_tile_w + accent_gap),
-                    accent_grid_y + static_cast<float>(row) * (accent_tile_h + accent_gap),
-                    accent_tile_w,
-                    accent_tile_h,
-                };
-                draw_fill(ui, tile, palette.surface_alt, 14.0f * scale, 0.96f);
-                draw_stroke(ui, tile, palette.border_soft, 14.0f * scale, 1.0f, 0.86f);
-                draw_fill(ui, Rect{tile.x + 10.0f * scale, tile.y + 10.0f * scale, tile.w - 20.0f * scale, 14.0f * scale},
-                          kAccentHexes[i], 7.0f * scale, 0.98f);
-                draw_text_left(ui, format_hex_color(kAccentHexes[i]),
-                               Rect{tile.x + 10.0f * scale, tile.y + 30.0f * scale, tile.w - 20.0f * scale, 14.0f * scale},
-                               font_meta(scale), palette.text, 0.98f);
-            }
+                            const Rect code_rect = rows_scope.next();
+                            draw_fill(ui, code_rect, palette.surface_deep, 16.0f * scale, 0.92f);
+                            draw_stroke(ui, code_rect, palette.border_soft, 16.0f * scale, 1.0f, 0.86f);
+                            for (std::size_t i = 0; i < code_lines.size(); ++i) {
+                                draw_text_left(ui, code_lines[i],
+                                               Rect{code_rect.x + 12.0f * scale, code_rect.y + 10.0f * scale + static_cast<float>(i) * 20.0f * scale,
+                                                    code_rect.w - 24.0f * scale, 18.0f * scale},
+                                               font_meta(scale), palette.muted, 0.98f);
+                            }
+                        });
+                });
 
-            draw_fill(ui, tokens_area, palette.surface_deep, 18.0f * scale, 0.92f);
-            draw_stroke(ui, tokens_area, palette.border_soft, 18.0f * scale, 1.0f, 0.90f);
-            draw_text_left(ui, state.light_mode ? "Current Theme Tokens: Light" : "Current Theme Tokens: Dark",
-                           Rect{tokens_area.x + 14.0f * scale, tokens_area.y + 12.0f * scale, tokens_area.w - 28.0f * scale, 18.0f * scale},
-                           font_body(scale), palette.text, 0.98f);
+            ui.card("Color System")
+                .in(color_rect)
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    const std::array<std::pair<const char*, std::uint32_t>, 10> tokens{{
+                        {"shell_top", palette.shell_top},
+                        {"shell_bottom", palette.shell_bottom},
+                        {"surface", palette.surface},
+                        {"surface_alt", palette.surface_alt},
+                        {"surface_deep", palette.surface_deep},
+                        {"border", palette.border},
+                        {"border_soft", palette.border_soft},
+                        {"accent", palette.accent},
+                        {"accent_soft", palette.accent_soft},
+                        {"muted", palette.muted},
+                    }};
 
-            const std::array<std::pair<const char*, std::uint32_t>, 10> tokens{{
-                {"shell_top", palette.shell_top},
-                {"shell_bottom", palette.shell_bottom},
-                {"surface", palette.surface},
-                {"surface_alt", palette.surface_alt},
-                {"surface_deep", palette.surface_deep},
-                {"border", palette.border},
-                {"border_soft", palette.border_soft},
-                {"accent", palette.accent},
-                {"accent_soft", palette.accent_soft},
-                {"muted", palette.muted},
-            }};
+                    ui.view(card.content())
+                        .column()
+                        .tracks({eui::quick::fr(1.0f), eui::quick::fr(2.1f)})
+                        .gap(12.0f * scale)
+                        .begin([&](auto& sections) {
+                            const Rect accents = sections.next();
+                            const Rect tokens_area = sections.next();
 
-            const Rect token_area{
-                tokens_area.x + 14.0f * scale,
-                tokens_area.y + 42.0f * scale,
-                tokens_area.w - 28.0f * scale,
-                tokens_area.h - 56.0f * scale,
-            };
-            const float token_gap = 8.0f * scale;
-            const float token_w = (token_area.w - token_gap) * 0.5f;
-            const float token_h = std::max(38.0f * scale, (token_area.h - token_gap * 4.0f) / 5.0f);
-            for (std::size_t i = 0; i < tokens.size(); ++i) {
-                const int row = static_cast<int>(i) / 2;
-                const int col = static_cast<int>(i) % 2;
-                const Rect tile{
-                    token_area.x + static_cast<float>(col) * (token_w + token_gap),
-                    token_area.y + static_cast<float>(row) * (token_h + token_gap),
-                    token_w,
-                    token_h,
-                };
-                draw_fill(ui, tile, palette.surface_alt, 14.0f * scale, 0.96f);
-                draw_stroke(ui, tile, palette.border_soft, 14.0f * scale, 1.0f, 0.86f);
-                const Rect swatch{
-                    tile.x + 10.0f * scale,
-                    tile.y + 10.0f * scale,
-                    16.0f * scale,
-                    std::max(14.0f * scale, tile.h - 20.0f * scale),
-                };
-                draw_fill(ui, swatch, tokens[i].second, std::min(swatch.w * 0.5f, 8.0f * scale), 0.98f);
-                draw_text_left(ui, tokens[i].first,
-                               Rect{tile.x + 34.0f * scale, tile.y + 10.0f * scale, tile.w - 46.0f * scale, 16.0f * scale},
-                               font_body(scale), palette.text, 0.98f);
-                draw_text_left(ui, format_hex_color(tokens[i].second),
-                               Rect{tile.x + 34.0f * scale, tile.y + tile.h - 22.0f * scale, tile.w - 46.0f * scale, 14.0f * scale},
-                               font_meta(scale), palette.muted, 0.96f);
-            }
-        });
+                            draw_fill(ui, accents, palette.surface_deep, 18.0f * scale, 0.92f);
+                            draw_stroke(ui, accents, palette.border_soft, 18.0f * scale, 1.0f, 0.90f);
+                            ui.view(accents)
+                                .padding(14.0f * scale)
+                                .column()
+                                .tracks({eui::quick::px(18.0f * scale), eui::quick::fr()})
+                                .gap(12.0f * scale)
+                                .begin([&](auto& accent_sections) {
+                                    const Rect title = accent_sections.next();
+                                    const Rect grid_rect = accent_sections.next();
+                                    draw_text_left(ui, "Built-in Accent Presets", title, font_body(scale), palette.text, 0.98f);
+                                    ui.grid(grid_rect)
+                                        .repeat_rows(2, eui::quick::fr())
+                                        .repeat_columns(3, eui::quick::fr())
+                                        .gap(10.0f * scale)
+                                        .begin([&](auto& accent_grid) {
+                                            for (std::size_t i = 0; i < kAccentHexes.size(); ++i) {
+                                                const Rect tile = accent_grid.next();
+                                                draw_fill(ui, tile, palette.surface_alt, 14.0f * scale, 0.96f);
+                                                draw_stroke(ui, tile, palette.border_soft, 14.0f * scale, 1.0f, 0.86f);
+                                                draw_fill(ui, Rect{tile.x + 10.0f * scale, tile.y + 10.0f * scale, tile.w - 20.0f * scale, 14.0f * scale},
+                                                          kAccentHexes[i], 7.0f * scale, 0.98f);
+                                                draw_text_left(ui, format_hex_color(kAccentHexes[i]),
+                                                               Rect{tile.x + 10.0f * scale, tile.y + 30.0f * scale, tile.w - 20.0f * scale, 14.0f * scale},
+                                                               font_meta(scale), palette.text, 0.98f);
+                                            }
+                                        });
+                                });
 
-    ui.card("Icon Reference")
-        .in(icon_rect)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto& card) {
-            const Rect action_row = card.dock_top(38.0f * scale, 12.0f * scale);
-            const bool open_hovered = hovered(input, action_row);
-            const float open_mix =
-                ui.presence(ui.id("gallery/design/open-icon-sidebar"), open_hovered || state.design_icon_library_open, 18.0f, 12.0f);
-            draw_fill(ui, action_row,
-                      state.design_icon_library_open ? nav_selected_fill_hex(palette)
-                                                     : mix_hex(palette.surface_deep, palette.accent, 0.10f * open_mix),
-                      action_row.h * 0.5f, 0.96f);
-            draw_stroke(ui, action_row,
-                        state.design_icon_library_open ? palette.accent
-                                                       : mix_hex(palette.border_soft, palette.accent, 0.18f * open_mix),
-                        action_row.h * 0.5f, 1.0f, 0.88f);
-            draw_icon(ui, 0xF03Au,
-                      Rect{action_row.x + 12.0f * scale, action_row.y + (action_row.h - 16.0f * scale) * 0.5f,
-                           16.0f * scale, 16.0f * scale},
-                      state.design_icon_library_open ? palette.accent : palette.text, 0.98f);
-            draw_text_left(ui, "Open Icon Sidebar",
-                           Rect{action_row.x + 34.0f * scale, action_row.y + 10.0f * scale, action_row.w - 46.0f * scale, 18.0f * scale},
-                           font_body(scale), state.design_icon_library_open ? palette.text : palette.muted, 0.98f);
-            if (clicked(input, action_row)) {
-                state.design_icon_library_open = true;
-            }
+                            draw_fill(ui, tokens_area, palette.surface_deep, 18.0f * scale, 0.92f);
+                            draw_stroke(ui, tokens_area, palette.border_soft, 18.0f * scale, 1.0f, 0.90f);
+                            ui.view(tokens_area)
+                                .padding(14.0f * scale)
+                                .column()
+                                .tracks({eui::quick::px(18.0f * scale), eui::quick::fr()})
+                                .gap(12.0f * scale)
+                                .begin([&](auto& token_sections) {
+                                    const Rect title = token_sections.next();
+                                    const Rect grid_rect = token_sections.next();
+                                    draw_text_left(ui, state.light_mode ? "Current Theme Tokens: Light" : "Current Theme Tokens: Dark",
+                                                   title, font_body(scale), palette.text, 0.98f);
+                                    ui.grid(grid_rect)
+                                        .repeat_rows(5, eui::quick::fr())
+                                        .repeat_columns(2, eui::quick::fr())
+                                        .gap(8.0f * scale)
+                                        .begin([&](auto& token_grid) {
+                                            for (std::size_t i = 0; i < tokens.size(); ++i) {
+                                                const Rect tile = token_grid.next();
+                                                draw_fill(ui, tile, palette.surface_alt, 14.0f * scale, 0.96f);
+                                                draw_stroke(ui, tile, palette.border_soft, 14.0f * scale, 1.0f, 0.86f);
+                                                const Rect swatch{
+                                                    tile.x + 10.0f * scale,
+                                                    tile.y + 10.0f * scale,
+                                                    16.0f * scale,
+                                                    std::max(14.0f * scale, tile.h - 20.0f * scale),
+                                                };
+                                                draw_fill(ui, swatch, tokens[i].second, std::min(swatch.w * 0.5f, 8.0f * scale), 0.98f);
+                                                draw_text_left(ui, tokens[i].first,
+                                                               Rect{tile.x + 34.0f * scale, tile.y + 10.0f * scale, tile.w - 46.0f * scale, 16.0f * scale},
+                                                               font_body(scale), palette.text, 0.98f);
+                                                draw_text_left(ui, format_hex_color(tokens[i].second),
+                                                               Rect{tile.x + 34.0f * scale, tile.y + tile.h - 22.0f * scale, tile.w - 46.0f * scale, 14.0f * scale},
+                                                               font_meta(scale), palette.muted, 0.96f);
+                                            }
+                                        });
+                                });
+                        });
+                });
 
-            const Rect content = card.content();
-            const float icon_gap = 10.0f * scale;
-            const float tile_w = (content.w - icon_gap * 2.0f) / 3.0f;
-            const float tile_h = (content.h - icon_gap * 3.0f) / 4.0f;
-            const std::size_t preview_count = std::min<std::size_t>(12, library_icons.size());
+            ui.card("Icon Reference")
+                .in(icon_rect)
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.view(card.content())
+                        .column()
+                        .tracks({eui::quick::px(38.0f * scale), eui::quick::fr()})
+                        .gap(12.0f * scale)
+                        .begin([&](auto& rows) {
+                            const Rect action_row = rows.next();
+                            const Rect content = rows.next();
+                            const bool open_hovered = hovered(input, action_row);
+                            const float open_mix =
+                                ui.presence(ui.id("gallery/design/open-icon-sidebar"), open_hovered || state.design_icon_library_open, 18.0f, 12.0f);
+                            draw_fill(ui, action_row,
+                                      state.design_icon_library_open ? nav_selected_fill_hex(palette)
+                                                                     : mix_hex(palette.surface_deep, palette.accent, 0.10f * open_mix),
+                                      action_row.h * 0.5f, 0.96f);
+                            draw_stroke(ui, action_row,
+                                        state.design_icon_library_open ? palette.accent
+                                                                       : mix_hex(palette.border_soft, palette.accent, 0.18f * open_mix),
+                                        action_row.h * 0.5f, 1.0f, 0.88f);
+                            draw_icon(ui, 0xF03Au,
+                                      Rect{action_row.x + 12.0f * scale, action_row.y + (action_row.h - 16.0f * scale) * 0.5f,
+                                           16.0f * scale, 16.0f * scale},
+                                      state.design_icon_library_open ? palette.accent : palette.text, 0.98f);
+                            draw_text_left(ui, "Open Icon Sidebar",
+                                           Rect{action_row.x + 34.0f * scale, action_row.y + 10.0f * scale, action_row.w - 46.0f * scale, 18.0f * scale},
+                                           font_body(scale), state.design_icon_library_open ? palette.text : palette.muted, 0.98f);
+                            if (clicked(input, action_row)) {
+                                state.design_icon_library_open = true;
+                            }
 
-            for (std::size_t i = 0; i < preview_count; ++i) {
-                const int row = static_cast<int>(i) / 3;
-                const int col = static_cast<int>(i) % 3;
-                const Rect tile{
-                    content.x + static_cast<float>(col) * (tile_w + icon_gap),
-                    content.y + static_cast<float>(row) * (tile_h + icon_gap),
-                    tile_w,
-                    tile_h,
-                };
-                draw_fill(ui, tile, palette.surface_deep, 16.0f * scale, 0.94f);
-                draw_stroke(ui, tile, i == 0 ? palette.accent : palette.border_soft, 16.0f * scale, 1.0f, 0.90f);
-                draw_icon(ui, library_icons[i].codepoint,
-                          Rect{tile.x + 12.0f * scale, tile.y + 12.0f * scale, 18.0f * scale, 18.0f * scale},
-                          i == 0 ? palette.accent : palette.text, 0.98f);
-                draw_text_left(ui, library_icons[i].label,
-                               Rect{tile.x + 38.0f * scale, tile.y + 10.0f * scale, tile.w - 50.0f * scale, 18.0f * scale},
-                               font_body(scale), palette.text, 0.98f);
-                draw_text_left(ui, format_codepoint(library_icons[i].codepoint),
-                               Rect{tile.x + 12.0f * scale, tile.y + 38.0f * scale, tile.w - 24.0f * scale, 16.0f * scale},
-                               font_meta(scale), palette.accent, 0.98f);
-                draw_text_left(ui, library_icons[i].usage,
-                               Rect{tile.x + 12.0f * scale, tile.y + 56.0f * scale, tile.w - 24.0f * scale, tile.h - 60.0f * scale},
-                               font_meta(scale), palette.muted, 0.96f);
-            }
+                            const std::size_t preview_count = std::min<std::size_t>(12, library_icons.size());
+                            auto preview_grid = ui.grid(content)
+                                                    .repeat_rows(4, eui::quick::fr())
+                                                    .repeat_columns(3, eui::quick::fr())
+                                                    .gap(10.0f * scale)
+                                                    .begin();
+                            for (std::size_t i = 0; i < preview_count; ++i) {
+                                const Rect tile = preview_grid.next();
+                                draw_fill(ui, tile, palette.surface_deep, 16.0f * scale, 0.94f);
+                                draw_stroke(ui, tile, i == 0 ? palette.accent : palette.border_soft, 16.0f * scale, 1.0f, 0.90f);
+                                draw_icon(ui, library_icons[i].codepoint,
+                                          Rect{tile.x + 12.0f * scale, tile.y + 12.0f * scale, 18.0f * scale, 18.0f * scale},
+                                          i == 0 ? palette.accent : palette.text, 0.98f);
+                                draw_text_left(ui, library_icons[i].label,
+                                               Rect{tile.x + 38.0f * scale, tile.y + 10.0f * scale, tile.w - 50.0f * scale, 18.0f * scale},
+                                               font_body(scale), palette.text, 0.98f);
+                                draw_text_left(ui, format_codepoint(library_icons[i].codepoint),
+                                               Rect{tile.x + 12.0f * scale, tile.y + 38.0f * scale, tile.w - 24.0f * scale, 16.0f * scale},
+                                               font_meta(scale), palette.accent, 0.98f);
+                                draw_text_left(ui, library_icons[i].usage,
+                                               Rect{tile.x + 12.0f * scale, tile.y + 56.0f * scale, tile.w - 24.0f * scale, tile.h - 60.0f * scale},
+                                               font_meta(scale), palette.muted, 0.96f);
+                            }
+                        });
+                });
         });
 
     const std::size_t page_size = 12;
@@ -1116,80 +1125,82 @@ void draw_design_page(UI& ui, const eui::InputState& input, GalleryState& state,
             .begin([&](auto& panel) {
                 const std::string page_text =
                     "Page " + std::to_string(state.design_icon_page + 1) + " / " + std::to_string(std::max(1, icon_page_count));
-                const Rect header_info = panel.dock_top(18.0f * scale, 4.0f * scale);
-                draw_text_left(ui, "Font Awesome JSON Catalog", header_info, font_body(scale), palette.text, 0.98f);
-                const Rect page_row = panel.dock_top(34.0f * scale, 8.0f * scale);
-                draw_fill(ui, page_row, palette.surface_deep, page_row.h * 0.5f, 0.96f);
-                draw_stroke(ui, page_row, palette.border_soft, page_row.h * 0.5f, 1.0f, 0.88f);
-                draw_text_center(ui, page_text, page_row, font_meta(scale), palette.text, 0.98f);
+                ui.view(panel.content())
+                    .column()
+                    .tracks({eui::quick::px(18.0f * scale), eui::quick::px(34.0f * scale), eui::quick::px(34.0f * scale),
+                             eui::quick::px(36.0f * scale), eui::quick::fr()})
+                    .gap(8.0f * scale)
+                    .begin([&](auto& rows) {
+                        const Rect header_info = rows.next();
+                        const Rect page_row = rows.next();
+                        const Rect actions = rows.next();
+                        const Rect close_row = rows.next();
+                        const Rect grid = rows.next();
 
-                const Rect actions = panel.dock_top(34.0f * scale, 8.0f * scale);
-                const auto action_split = ui.split_h_ratio(actions, 0.5f, 8.0f * scale);
-                draw_fill(ui, action_split.first, palette.surface_deep, actions.h * 0.5f, 0.96f);
-                draw_stroke(ui, action_split.first, palette.border_soft, actions.h * 0.5f, 1.0f, 0.88f);
-                draw_text_center(ui, "Prev Page", action_split.first, font_meta(scale), palette.text, 0.98f);
-                if (clicked(input, action_split.first)) {
-                    state.design_icon_page = std::max(0, state.design_icon_page - 1);
-                }
-                draw_fill(ui, action_split.second, palette.surface_deep, actions.h * 0.5f, 0.96f);
-                draw_stroke(ui, action_split.second, palette.border_soft, actions.h * 0.5f, 1.0f, 0.88f);
-                draw_text_center(ui, "Next Page", action_split.second, font_meta(scale), palette.text, 0.98f);
-                if (clicked(input, action_split.second)) {
-                    state.design_icon_page = std::min(std::max(0, icon_page_count - 1), state.design_icon_page + 1);
-                }
+                        draw_text_left(ui, "Font Awesome JSON Catalog", header_info, font_body(scale), palette.text, 0.98f);
+                        draw_fill(ui, page_row, palette.surface_deep, page_row.h * 0.5f, 0.96f);
+                        draw_stroke(ui, page_row, palette.border_soft, page_row.h * 0.5f, 1.0f, 0.88f);
+                        draw_text_center(ui, page_text, page_row, font_meta(scale), palette.text, 0.98f);
 
-                const Rect close_row = panel.dock_top(36.0f * scale, 10.0f * scale);
-                draw_fill(ui, close_row, nav_selected_fill_hex(palette), close_row.h * 0.5f, 0.96f);
-                draw_stroke(ui, close_row, palette.accent, close_row.h * 0.5f, 1.0f, 0.92f);
-                draw_text_center(ui, "Close Sidebar", close_row, font_body(scale), palette.text, 0.98f);
-                if (clicked(input, close_row)) {
-                    state.design_icon_library_open = false;
-                }
+                        ui.row(actions)
+                            .tracks({eui::quick::fr(), eui::quick::fr()})
+                            .gap(8.0f * scale)
+                            .begin([&](auto& action_cols) {
+                                const Rect prev_button = action_cols.next();
+                                const Rect next_button = action_cols.next();
+                                draw_fill(ui, prev_button, palette.surface_deep, actions.h * 0.5f, 0.96f);
+                                draw_stroke(ui, prev_button, palette.border_soft, actions.h * 0.5f, 1.0f, 0.88f);
+                                draw_text_center(ui, "Prev Page", prev_button, font_meta(scale), palette.text, 0.98f);
+                                if (clicked(input, prev_button)) {
+                                    state.design_icon_page = std::max(0, state.design_icon_page - 1);
+                                }
+                                draw_fill(ui, next_button, palette.surface_deep, actions.h * 0.5f, 0.96f);
+                                draw_stroke(ui, next_button, palette.border_soft, actions.h * 0.5f, 1.0f, 0.88f);
+                                draw_text_center(ui, "Next Page", next_button, font_meta(scale), palette.text, 0.98f);
+                                if (clicked(input, next_button)) {
+                                    state.design_icon_page = std::min(std::max(0, icon_page_count - 1), state.design_icon_page + 1);
+                                }
+                            });
 
-                const Rect grid = panel.content();
-                const float gap = 10.0f * scale;
-                const float tile_w = (grid.w - gap * 2.0f) / 3.0f;
-                const float tile_h = (grid.h - gap * 3.0f) / 4.0f;
-                const std::size_t start = static_cast<std::size_t>(state.design_icon_page) * page_size;
-                const std::size_t end = std::min(library_icons.size(), start + page_size);
-                for (std::size_t i = start; i < end; ++i) {
-                    const std::size_t local = i - start;
-                    const int row = static_cast<int>(local) / 3;
-                    const int col = static_cast<int>(local) % 3;
-                    const Rect tile{
-                        grid.x + static_cast<float>(col) * (tile_w + gap),
-                        grid.y + static_cast<float>(row) * (tile_h + gap),
-                        tile_w,
-                        tile_h,
-                    };
-                    draw_fill(ui, tile, palette.surface_deep, 16.0f * scale, 0.96f);
-                    draw_stroke(ui, tile, palette.border_soft, 16.0f * scale, 1.0f, 0.88f);
-                    draw_icon(ui, library_icons[i].codepoint,
-                              Rect{tile.x + 12.0f * scale, tile.y + 10.0f * scale, 18.0f * scale, 18.0f * scale},
-                              palette.accent, 0.98f);
-                    draw_text_left(ui, library_icons[i].label,
-                                   Rect{tile.x + 38.0f * scale, tile.y + 9.0f * scale, tile.w - 50.0f * scale, 18.0f * scale},
-                                   font_body(scale), palette.text, 0.98f);
-                    draw_text_left(ui, format_codepoint(library_icons[i].codepoint),
-                                   Rect{tile.x + 12.0f * scale, tile.y + 34.0f * scale, tile.w - 24.0f * scale, 16.0f * scale},
-                                   font_meta(scale), palette.accent, 0.98f);
-                    draw_text_left(ui, library_icons[i].usage,
-                                   Rect{tile.x + 12.0f * scale, tile.y + 52.0f * scale, tile.w - 24.0f * scale,
-                                        tile.h - 58.0f * scale},
-                                   font_meta(scale), palette.muted, 0.96f);
-                }
+                        draw_fill(ui, close_row, nav_selected_fill_hex(palette), close_row.h * 0.5f, 0.96f);
+                        draw_stroke(ui, close_row, palette.accent, close_row.h * 0.5f, 1.0f, 0.92f);
+                        draw_text_center(ui, "Close Sidebar", close_row, font_body(scale), palette.text, 0.98f);
+                        if (clicked(input, close_row)) {
+                            state.design_icon_library_open = false;
+                        }
+
+                        const std::size_t start = static_cast<std::size_t>(state.design_icon_page) * page_size;
+                        const std::size_t end = std::min(library_icons.size(), start + page_size);
+                        auto icon_grid = ui.grid(grid)
+                                             .repeat_rows(4, eui::quick::fr())
+                                             .repeat_columns(3, eui::quick::fr())
+                                             .gap(10.0f * scale)
+                                             .begin();
+                        for (std::size_t i = start; i < end; ++i) {
+                            const Rect tile = icon_grid.next();
+                            draw_fill(ui, tile, palette.surface_deep, 16.0f * scale, 0.96f);
+                            draw_stroke(ui, tile, palette.border_soft, 16.0f * scale, 1.0f, 0.88f);
+                            draw_icon(ui, library_icons[i].codepoint,
+                                      Rect{tile.x + 12.0f * scale, tile.y + 10.0f * scale, 18.0f * scale, 18.0f * scale},
+                                      palette.accent, 0.98f);
+                            draw_text_left(ui, library_icons[i].label,
+                                           Rect{tile.x + 38.0f * scale, tile.y + 9.0f * scale, tile.w - 50.0f * scale, 18.0f * scale},
+                                           font_body(scale), palette.text, 0.98f);
+                            draw_text_left(ui, format_codepoint(library_icons[i].codepoint),
+                                           Rect{tile.x + 12.0f * scale, tile.y + 34.0f * scale, tile.w - 24.0f * scale, 16.0f * scale},
+                                           font_meta(scale), palette.accent, 0.98f);
+                            draw_text_left(ui, library_icons[i].usage,
+                                           Rect{tile.x + 12.0f * scale, tile.y + 52.0f * scale, tile.w - 24.0f * scale,
+                                                tile.h - 58.0f * scale},
+                                           font_meta(scale), palette.muted, 0.96f);
+                        }
+                    });
             });
     }
 }
 
 void draw_basic_controls_page(UI& ui, const eui::InputState& input, GalleryState& state, const Rect& rect, float scale) {
     const GalleryPalette palette = make_gallery_palette(state);
-    const float page_gap = 18.0f * scale;
-    const float column_w = std::max(0.0f, (rect.w - page_gap * 3.0f) * 0.25f);
-    const Rect col_one{rect.x, rect.y, column_w, rect.h};
-    const Rect col_two{col_one.x + column_w + page_gap, rect.y, column_w, rect.h};
-    const Rect col_three{col_two.x + column_w + page_gap, rect.y, column_w, rect.h};
-    const Rect col_four{col_three.x + column_w + page_gap, rect.y, column_w, rect.h};
     const std::array<std::string_view, 3> control_modes{{"Compact", "Balanced", "Comfortable"}};
     const std::array<std::string_view, 3> control_toggles{{"Toolbar", "Cards", "Blur"}};
     const std::array<IconDescriptor, 3> control_icons{{
@@ -1197,661 +1208,819 @@ void draw_basic_controls_page(UI& ui, const eui::InputState& input, GalleryState
         {"Layout", "Panels / splits", 0xF0DBu},
         {"Motion", "Animation / easing", 0xF061u},
     }};
+    const auto layout_gap = eui::quick::bind([&] { return 18.0f * scale; });
+    const auto card_radius = eui::quick::bind([&] { return 22.0f * scale; });
+    const auto heading_font = eui::quick::bind([&] { return font_heading(scale); });
+    const auto compact_height = eui::quick::bind([&] { return 32.0f * scale; });
+    const auto normal_height = eui::quick::bind([&] { return 36.0f * scale; });
+    const float compact_h = 32.0f * scale;
+    const float normal_h = 36.0f * scale;
 
-    ui.card("Buttons")
-        .in(col_one)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto& card) {
-            const Rect icon_row = card.dock_top(72.0f * scale, 12.0f * scale);
-            const Rect summary_row = card.dock_bottom(34.0f * scale, 0.0f);
-            const float icon_gap = 8.0f * scale;
-            const float icon_w = (icon_row.w - icon_gap * 2.0f) / 3.0f;
-            for (std::size_t i = 0; i < control_icons.size(); ++i) {
-                const Rect chip{
-                    icon_row.x + static_cast<float>(i) * (icon_w + icon_gap),
-                    icon_row.y,
-                    icon_w,
-                    icon_row.h,
-                };
-                const bool is_selected = state.selected_control_icon == static_cast<int>(i);
-                const bool is_hovered = hovered(input, chip);
-                const float mix = ui.presence(ui.id("gallery/basic/icon-chip", static_cast<std::uint64_t>(i + 1u)),
-                                              is_hovered || is_selected, 18.0f, 12.0f);
-                draw_fill(ui, chip, is_selected ? nav_selected_fill_hex(palette) : mix_hex(palette.surface_deep, palette.accent, 0.10f * mix),
-                          16.0f * scale, 0.96f);
-                draw_stroke(ui, chip, is_selected ? palette.accent : mix_hex(palette.border_soft, palette.accent, 0.18f * mix),
-                            16.0f * scale, 1.0f, 0.88f);
-                draw_icon(ui, control_icons[i].codepoint,
-                          Rect{chip.x + chip.w * 0.5f - 8.0f * scale, chip.y + 12.0f * scale,
-                               16.0f * scale, 16.0f * scale},
-                          is_selected ? palette.accent : palette.text, 0.98f);
-                draw_text_center(ui, control_icons[i].label,
-                                 Rect{chip.x + 6.0f * scale, chip.y + 38.0f * scale, chip.w - 12.0f * scale, 18.0f * scale},
-                                 font_meta(scale), is_selected ? palette.text : palette.muted, 0.98f);
-                if (clicked(input, chip)) {
-                    state.selected_control_icon = static_cast<int>(i);
-                }
-            }
+    ui.row(rect)
+        .tracks({eui::quick::fr(), eui::quick::fr(), eui::quick::fr(), eui::quick::fr()})
+        .gap(layout_gap)
+        .begin([&](auto& columns) {
+            ui.card("Buttons")
+                .in(columns.next())
+                .title_font(heading_font)
+                .radius(card_radius)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.view(card.content())
+                        .column()
+                        .tracks({eui::quick::px(72.0f * scale), eui::quick::fr(), eui::quick::px(18.0f * scale)})
+                        .gap(12.0f * scale)
+                        .begin([&](auto& rows) {
+                            const Rect icon_row = rows.next();
+                            const Rect content = rows.next();
+                            const Rect summary_row = rows.next();
 
-            if (ui.button("Primary Action").primary().height(36.0f * scale).draw()) {
-                state.progress_ratio = std::min(1.0f, state.progress_ratio + 0.08f);
-            }
-            if (ui.button("Reset Progress").ghost().height(34.0f * scale).draw()) {
-                state.progress_ratio = 0.18f;
-            }
-            ui.readonly("Selected", std::string(control_icons[static_cast<std::size_t>(std::clamp(state.selected_control_icon, 0, 2))].label))
-                .height(32.0f * scale)
-                .draw();
-            draw_text_left(ui, "Compact button sizing keeps the page readable.", summary_row, font_meta(scale), palette.muted, 0.96f);
-        });
+                            ui.row(icon_row)
+                                .tracks({eui::quick::fr(), eui::quick::fr(), eui::quick::fr()})
+                                .gap(eui::quick::bind([&] { return 8.0f * scale; }))
+                                .begin([&](auto& icon_slots) {
+                                    for (std::size_t i = 0; i < control_icons.size(); ++i) {
+                                        const Rect chip = icon_slots.next();
+                                        const bool is_selected = state.selected_control_icon == static_cast<int>(i);
+                                        const bool is_hovered = hovered(input, chip);
+                                        const float mix =
+                                            ui.presence(ui.id("gallery/basic/icon-chip", static_cast<std::uint64_t>(i + 1u)),
+                                                        is_hovered || is_selected, 18.0f, 12.0f);
+                                        draw_fill(ui, chip,
+                                                  is_selected ? nav_selected_fill_hex(palette)
+                                                              : mix_hex(palette.surface_deep, palette.accent, 0.10f * mix),
+                                                  16.0f * scale, 0.96f);
+                                        draw_stroke(ui, chip,
+                                                    is_selected ? palette.accent
+                                                                : mix_hex(palette.border_soft, palette.accent, 0.18f * mix),
+                                                    16.0f * scale, 1.0f, 0.88f);
+                                        draw_icon(ui, control_icons[i].codepoint,
+                                                  Rect{chip.x + chip.w * 0.5f - 8.0f * scale, chip.y + 12.0f * scale,
+                                                       16.0f * scale, 16.0f * scale},
+                                                  is_selected ? palette.accent : palette.text, 0.98f);
+                                        draw_text_center(ui, control_icons[i].label,
+                                                         Rect{chip.x + 6.0f * scale, chip.y + 38.0f * scale, chip.w - 12.0f * scale,
+                                                              18.0f * scale},
+                                                         font_meta(scale), is_selected ? palette.text : palette.muted, 0.98f);
+                                        if (clicked(input, chip)) {
+                                            state.selected_control_icon = static_cast<int>(i);
+                                        }
+                                    }
+                                });
 
-    ui.card("Selection")
-        .in(col_two)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto&) {
-            ui.readonly("Single", "Exclusive tab group").height(32.0f * scale).draw();
-            for (int i = 0; i < static_cast<int>(control_modes.size()); ++i) {
-                if (ui.tab(control_modes[static_cast<std::size_t>(i)], state.controls_mode == i).height(32.0f * scale).draw()) {
-                    state.controls_mode = i;
-                }
-            }
-            ui.readonly("Multi", "Independent toggles").height(32.0f * scale).draw();
-            for (int i = 0; i < static_cast<int>(control_toggles.size()); ++i) {
-                if (ui.tab(control_toggles[static_cast<std::size_t>(i)],
-                           state.controls_multi_select[static_cast<std::size_t>(i)]).height(32.0f * scale).draw()) {
-                    state.controls_multi_select[static_cast<std::size_t>(i)] =
-                        !state.controls_multi_select[static_cast<std::size_t>(i)];
-                }
-            }
-            const std::string enabled_summary =
-                std::string(state.controls_multi_select[0] ? "Toolbar " : "") +
-                (state.controls_multi_select[1] ? "Cards " : "") +
-                (state.controls_multi_select[2] ? "Blur" : "");
-            ui.readonly("Enabled", enabled_summary.empty() ? "None" : enabled_summary).height(32.0f * scale).draw();
-        });
+                            ui.view(content)
+                                .column()
+                                .tracks({eui::quick::px(normal_h), eui::quick::px(compact_h), eui::quick::px(compact_h)})
+                                .gap(8.0f * scale)
+                                .begin([&](auto& button_rows) {
+                                    if (ui.button("Primary Action").in(button_rows.next()).primary().height(normal_height).draw()) {
+                                        state.progress_ratio = std::min(1.0f, state.progress_ratio + 0.08f);
+                                    }
+                                    if (ui.button("Reset Progress").in(button_rows.next()).ghost().height(compact_height).draw()) {
+                                        state.progress_ratio = 0.18f;
+                                    }
+                                    ui.readonly("Selected",
+                                                std::string(control_icons[static_cast<std::size_t>(std::clamp(state.selected_control_icon, 0, 2))].label))
+                                        .in(button_rows.next())
+                                        .height(compact_height)
+                                        .draw();
+                                });
 
-    ui.card("Inputs")
-        .in(col_three)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto&) {
-            const std::string spacing_text = format_pixels(state.layout_gap);
-            const std::string density_text = std::string(control_modes[static_cast<std::size_t>(std::clamp(state.controls_mode, 0, 2))]);
-            ui.input("Search", state.search_text).placeholder("Type to filter").height(38.0f * scale).draw();
-            std::string dropdown_label = "Density: ";
-            dropdown_label += density_text;
-            ui.dropdown(dropdown_label, state.controls_dropdown_open).body_height(144.0f * scale).padding(14.0f * scale).begin([&](auto&) {
-                for (int i = 0; i < static_cast<int>(control_modes.size()); ++i) {
-                    if (ui.button(control_modes[static_cast<std::size_t>(i)]).ghost().height(36.0f * scale).draw()) {
-                        state.controls_mode = i;
-                        state.controls_dropdown_open = false;
-                    }
-                }
-            });
-            ui.slider("Progress", state.progress_ratio).range(0.0f, 1.0f).decimals(2).height(36.0f * scale).draw();
-            ui.slider("Live Value", state.control_slider).range(0.0f, 1.0f).decimals(2).height(36.0f * scale).draw();
-            ui.progress("Completion", state.progress_ratio).height(10.0f * scale).draw();
-            ui.readonly("Gap / Accent", spacing_text + " / " + format_hex_color(accent_hex(state))).height(32.0f * scale).draw();
-            if (ui.button("Jump To Animation Page").secondary().height(36.0f * scale).draw()) {
-                state.selected_page = kPageAnimation;
-            }
-        });
+                            draw_text_left(ui, "Compact button sizing keeps the page readable.", summary_row, font_meta(scale), palette.muted, 0.96f);
+                        });
+                });
 
-    ui.card("Editor")
-        .in(col_four)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto& card) {
-            ui.readonly("Purpose", "Multiline input, wrapping and scroll behavior").height(32.0f * scale).draw();
-            const float notes_h = std::max(160.0f * scale, card.content().h - 40.0f * scale);
-            ui.text_area("Notes", state.notes_text).height(notes_h).draw();
+            ui.card("Selection")
+                .in(columns.next())
+                .title_font(heading_font)
+                .radius(card_radius)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.column(card.content())
+                        .tracks({eui::quick::px(compact_h), eui::quick::px(compact_h), eui::quick::px(compact_h), eui::quick::px(compact_h),
+                                 eui::quick::px(compact_h), eui::quick::px(compact_h), eui::quick::px(compact_h), eui::quick::px(compact_h),
+                                 eui::quick::px(compact_h)})
+                        .gap(8.0f * scale)
+                        .begin([&](auto& selection_rows) {
+                            ui.readonly("Single", "Exclusive tab group").in(selection_rows.next()).height(compact_height).draw();
+                            for (int i = 0; i < static_cast<int>(control_modes.size()); ++i) {
+                                if (ui.tab(control_modes[static_cast<std::size_t>(i)], state.controls_mode == i)
+                                        .in(selection_rows.next())
+                                        .height(compact_height)
+                                        .draw()) {
+                                    state.controls_mode = i;
+                                }
+                            }
+                            ui.readonly("Multi", "Independent toggles").in(selection_rows.next()).height(compact_height).draw();
+                            for (int i = 0; i < static_cast<int>(control_toggles.size()); ++i) {
+                                if (ui.tab(control_toggles[static_cast<std::size_t>(i)],
+                                           state.controls_multi_select[static_cast<std::size_t>(i)])
+                                        .in(selection_rows.next())
+                                        .height(compact_height)
+                                        .draw()) {
+                                    state.controls_multi_select[static_cast<std::size_t>(i)] =
+                                        !state.controls_multi_select[static_cast<std::size_t>(i)];
+                                }
+                            }
+                            const std::string enabled_summary =
+                                std::string(state.controls_multi_select[0] ? "Toolbar " : "") +
+                                (state.controls_multi_select[1] ? "Cards " : "") +
+                                (state.controls_multi_select[2] ? "Blur" : "");
+                            ui.readonly("Enabled", enabled_summary.empty() ? "None" : enabled_summary)
+                                .in(selection_rows.next())
+                                .height(compact_height)
+                                .draw();
+                        });
+                });
+
+            ui.card("Inputs")
+                .in(columns.next())
+                .title_font(heading_font)
+                .radius(card_radius)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    const std::string spacing_text = format_pixels(state.layout_gap);
+                    const std::string density_text = std::string(control_modes[static_cast<std::size_t>(std::clamp(state.controls_mode, 0, 2))]);
+                    ui.column(card.content())
+                        .tracks({eui::quick::px(38.0f * scale), eui::quick::px(normal_h), eui::quick::px(normal_h), eui::quick::px(normal_h),
+                                 eui::quick::px(10.0f * scale), eui::quick::px(compact_h), eui::quick::px(normal_h)})
+                        .gap(8.0f * scale)
+                        .begin([&](auto& input_rows) {
+                            ui.input("Search", state.search_text)
+                                .in(input_rows.next())
+                                .placeholder("Type to filter")
+                                .height(eui::quick::bind([&] { return 38.0f * scale; }))
+                                .draw();
+
+                            std::string dropdown_label = "Density: ";
+                            dropdown_label += density_text;
+                            const Rect dropdown_row = input_rows.next();
+                            ui.scope(dropdown_row, [&](auto&) {
+                                ui.dropdown(dropdown_label, state.controls_dropdown_open)
+                                    .body_height(eui::quick::bind([&] { return 144.0f * scale; }))
+                                    .padding(eui::quick::bind([&] { return 14.0f * scale; }))
+                                    .begin([&](auto& menu) {
+                                        ui.column(menu.content())
+                                            .repeat(control_modes.size(), eui::quick::px(normal_h))
+                                            .gap(8.0f * scale)
+                                            .begin([&](auto& menu_rows) {
+                                                for (int i = 0; i < static_cast<int>(control_modes.size()); ++i) {
+                                                    if (ui.button(control_modes[static_cast<std::size_t>(i)])
+                                                            .in(menu_rows.next())
+                                                            .ghost()
+                                                            .height(normal_height)
+                                                            .draw()) {
+                                                        state.controls_mode = i;
+                                                        state.controls_dropdown_open = false;
+                                                    }
+                                                }
+                                            });
+                                    });
+                            });
+
+                            ui.slider("Progress", state.progress_ratio).in(input_rows.next()).range(0.0f, 1.0f).decimals(2).height(normal_height).draw();
+                            ui.slider("Live Value", state.control_slider).in(input_rows.next()).range(0.0f, 1.0f).decimals(2).height(normal_height).draw();
+                            ui.progress("Completion", state.progress_ratio).in(input_rows.next()).height(eui::quick::bind([&] { return 10.0f * scale; })).draw();
+                            ui.readonly("Gap / Accent", spacing_text + " / " + format_hex_color(accent_hex(state)))
+                                .in(input_rows.next())
+                                .height(compact_height)
+                                .draw();
+                            if (ui.button("Jump To Animation Page").in(input_rows.next()).secondary().height(normal_height).draw()) {
+                                state.selected_page = kPageAnimation;
+                            }
+                        });
+                });
+
+            ui.card("Editor")
+                .in(columns.next())
+                .title_font(heading_font)
+                .radius(card_radius)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.readonly("Purpose", "Multiline input, wrapping and scroll behavior").height(compact_height).draw();
+                    ui.text_area("Notes", state.notes_text)
+                        .height(eui::quick::bind([&] { return std::max(160.0f * scale, card.content().h - 40.0f * scale); }))
+                        .draw();
+                });
         });
 }
 
 void draw_layout_page(UI& ui, GalleryState& state, const Rect& rect, float scale) {
     const std::uint32_t accent = accent_hex(state);
     const GalleryPalette palette = make_gallery_palette(state);
-    const auto split = ui.split_v_ratio(rect, 0.30f, 18.0f * scale);
+    ui.column(rect)
+        .tracks({eui::quick::px(168.0f * scale), eui::quick::fr()})
+        .gap(18.0f * scale)
+        .begin([&](auto& page_rows) {
+            ui.card("Layout Controls")
+                .in(page_rows.next())
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.column(card.content())
+                        .tracks({eui::quick::px(40.0f * scale), eui::quick::px(40.0f * scale), eui::quick::px(36.0f * scale)})
+                        .gap(10.0f * scale)
+                        .begin([&](auto& control_rows) {
+                            ui.slider("Gap", state.layout_gap).in(control_rows.next()).range(8.0f, 28.0f).decimals(0).height(40.0f * scale).draw();
+                            ui.slider("Radius", state.layout_radius).in(control_rows.next()).range(8.0f, 28.0f).decimals(0).height(40.0f * scale).draw();
+                            ui.readonly("Core APIs", "view(), row(), column(), grid(), zstack()")
+                                .in(control_rows.next())
+                                .height(36.0f * scale)
+                                .draw();
+                        });
+                });
 
-    ui.card("Layout Controls")
-        .in(split.first)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto&) {
-            ui.slider("Gap", state.layout_gap).range(8.0f, 28.0f).decimals(0).height(36.0f * scale).draw();
-            ui.slider("Radius", state.layout_radius).range(8.0f, 28.0f).decimals(0).height(36.0f * scale).draw();
-            ui.readonly("Core APIs", "split_h_ratio, split_v_ratio, dock_top, content()").height(36.0f * scale).draw();
+            const Rect preview_rect = page_rows.next();
+            const float gap = state.layout_gap * scale;
+            const float radius = state.layout_radius * scale;
+
+            ui.card("Layout Composition")
+                .in(preview_rect)
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.view(card.content())
+                        .column()
+                        .tracks({eui::quick::px(52.0f * scale), eui::quick::fr()})
+                        .gap(gap)
+                        .begin([&](auto& rows) {
+                            const Rect toolbar = rows.next();
+                            const Rect body = rows.next();
+
+                            draw_fill(ui, toolbar, palette.surface_deep, radius, 0.98f);
+                            draw_stroke(ui, toolbar, accent, radius, 1.0f, 0.52f);
+                            draw_text_left(ui, "Toolbar / Filters", inset_rect(toolbar, 16.0f * scale, 14.0f * scale), font_heading(scale), palette.text, 0.98f);
+
+                            ui.row(body)
+                                .tracks({eui::quick::px(120.0f * scale), eui::quick::fr(1.8f), eui::quick::px(160.0f * scale)})
+                                .gap(gap)
+                                .begin([&](auto& cols) {
+                                    const Rect sidebar = cols.next();
+                                    const Rect center = cols.next();
+                                    const Rect inspector = cols.next();
+
+                                    draw_fill(ui, sidebar, palette.surface_deep, radius, 0.98f);
+                                    draw_stroke(ui, sidebar, palette.border_soft, radius, 1.0f, 0.96f);
+                                    draw_text_left(ui, "Sidebar", inset_rect(sidebar, 14.0f * scale, 14.0f * scale), font_heading(scale), palette.text, 0.98f);
+
+                                    ui.column(center)
+                                        .tracks({eui::quick::fr(3.0f), eui::quick::fr(1.0f)})
+                                        .gap(gap)
+                                        .begin([&](auto& center_rows) {
+                                            const Rect canvas = center_rows.next();
+                                            const Rect footer = center_rows.next();
+
+                                            draw_fill(ui, canvas, palette.surface, radius, 0.98f);
+                                            draw_stroke(ui, canvas, palette.border_soft, radius, 1.0f, 0.96f);
+                                            draw_text_left(ui, "Canvas Region", inset_rect(canvas, 18.0f * scale, 16.0f * scale), font_heading(scale), palette.text, 0.98f);
+
+                                            ui.zstack(canvas)
+                                                .layers(2)
+                                                .padding(18.0f * scale)
+                                                .begin([&](auto& layers) {
+                                                    const Rect base = layers.next();
+                                                    const Rect overlay = inset_rect(layers.next(), 18.0f * scale, 18.0f * scale);
+                                                    const Rect center_title{
+                                                        base.x + 32.0f * scale,
+                                                        base.y + base.h * 0.5f - 18.0f * scale,
+                                                        base.w - 64.0f * scale,
+                                                        20.0f * scale,
+                                                    };
+                                                    const Rect center_subtitle{
+                                                        base.x + 40.0f * scale,
+                                                        center_title.y + 22.0f * scale,
+                                                        base.w - 80.0f * scale,
+                                                        18.0f * scale,
+                                                    };
+                                                    draw_fill(ui, base, mix_hex(palette.surface_deep, accent, 0.08f), 18.0f * scale, 0.92f);
+                                                    draw_stroke(ui, base, palette.border_soft, 18.0f * scale, 1.0f, 0.88f);
+                                                    draw_stroke(ui, overlay, mix_hex(palette.border_soft, accent, 0.26f), 14.0f * scale, 1.0f, 0.90f);
+                                                    draw_text_center(ui, "Centered Content", center_title, font_heading(scale), palette.text, 0.98f);
+                                                    draw_text_center(ui, "zstack() keeps the middle region aligned while side panels resize.",
+                                                                     center_subtitle, font_meta(scale), palette.muted, 0.96f);
+                                                });
+
+                                            draw_fill(ui, footer, palette.surface_deep, radius, 0.98f);
+                                            draw_stroke(ui, footer, palette.border_soft, radius, 1.0f, 0.96f);
+                                            draw_text_left(ui, "Footer Tools", inset_rect(footer, 18.0f * scale, 16.0f * scale), font_heading(scale), palette.text, 0.98f);
+                                        });
+
+                                    draw_fill(ui, inspector, palette.surface_deep, radius, 0.98f);
+                                    draw_stroke(ui, inspector, mix_hex(palette.border_soft, accent, 0.26f), radius, 1.0f, 0.96f);
+                                    draw_text_left(ui, "Inspector", inset_rect(inspector, 14.0f * scale, 14.0f * scale), font_heading(scale), palette.text, 0.98f);
+                                });
+                        });
+                });
         });
-
-    const float gap = state.layout_gap * scale;
-    const float radius = state.layout_radius * scale;
-    draw_fill(ui, split.second, palette.surface_alt, 22.0f * scale, 1.0f);
-    draw_stroke(ui, split.second, palette.border, 22.0f * scale, 1.0f, 1.0f);
-
-    const Rect shell = inset_rect(split.second, 18.0f * scale);
-    const Rect toolbar{shell.x, shell.y, shell.w, 52.0f * scale};
-    const Rect body{shell.x, toolbar.y + toolbar.h + gap, shell.w, shell.h - toolbar.h - gap};
-    const auto columns = ui.split_h_ratio(body, 0.22f, gap);
-    const auto workspace = ui.split_h_ratio(columns.second, 0.70f, gap);
-    const auto canvas_split = ui.split_v_ratio(workspace.first, 0.74f, gap);
-
-    draw_fill(ui, toolbar, palette.surface_deep, radius, 0.98f);
-    draw_stroke(ui, toolbar, accent, radius, 1.0f, 0.52f);
-    draw_text_left(ui, "Toolbar / Filters", inset_rect(toolbar, 16.0f * scale, 14.0f * scale), font_heading(scale), palette.text, 0.98f);
-
-    draw_fill(ui, columns.first, palette.surface_deep, radius, 0.98f);
-    draw_stroke(ui, columns.first, palette.border_soft, radius, 1.0f, 0.96f);
-    draw_text_left(ui, "Sidebar", inset_rect(columns.first, 14.0f * scale, 14.0f * scale), font_heading(scale), palette.text, 0.98f);
-
-    draw_fill(ui, workspace.first, palette.surface, radius, 0.98f);
-    draw_stroke(ui, workspace.first, palette.border_soft, radius, 1.0f, 0.96f);
-    draw_text_left(ui, "Canvas Region", inset_rect(canvas_split.first, 18.0f * scale, 16.0f * scale), font_heading(scale), palette.text, 0.98f);
-
-    draw_fill(ui, canvas_split.second, palette.surface_deep, radius, 0.98f);
-    draw_stroke(ui, canvas_split.second, palette.border_soft, radius, 1.0f, 0.96f);
-    draw_text_left(ui, "Footer Tools", inset_rect(canvas_split.second, 18.0f * scale, 16.0f * scale), font_heading(scale), palette.text, 0.98f);
-
-    draw_fill(ui, workspace.second, palette.surface_deep, radius, 0.98f);
-    draw_stroke(ui, workspace.second, mix_hex(palette.border_soft, accent, 0.26f), radius, 1.0f, 0.96f);
-    draw_text_left(ui, "Inspector", inset_rect(workspace.second, 14.0f * scale, 14.0f * scale), font_heading(scale), palette.text, 0.98f);
 }
 
 void draw_animation_page(UI& ui, const eui::InputState& input, GalleryState& state, const Rect& rect, float scale,
                          double time_seconds) {
     const GalleryPalette palette = make_gallery_palette(state);
     const std::uint32_t accent = accent_hex(state);
-    const Rect selector_rect{rect.x, rect.y, rect.w, 154.0f * scale};
-    const Rect stage_rect{rect.x, rect.y + 166.0f * scale, rect.w, rect.h - 166.0f * scale};
     const DemoDescriptor& current =
         kDemos[static_cast<std::size_t>(std::clamp(state.selected_animation_demo, 0, static_cast<int>(kDemos.size() - 1)))];
+    ui.column(rect)
+        .tracks({eui::quick::px(154.0f * scale), eui::quick::fr()})
+        .gap(12.0f * scale)
+        .begin([&](auto& rows) {
+            const Rect selector_rect = rows.next();
+            const Rect stage_rect = rows.next();
 
-    draw_fill(ui, selector_rect, palette.surface_alt, 20.0f * scale, 1.0f);
-    draw_stroke(ui, selector_rect, palette.border, 20.0f * scale, 1.0f, 1.0f);
+            ui.card("Animation Catalog")
+                .in(selector_rect)
+                .title_font(font_heading(scale))
+                .radius(20.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.view(card.content())
+                        .column()
+                        .tracks({eui::quick::fr(), eui::quick::px(24.0f * scale)})
+                        .gap(12.0f * scale)
+                        .begin([&](auto& sections) {
+                            const Rect grid_rect = sections.next();
+                            const Rect info_row = sections.next();
 
-    const float grid_gap = 10.0f * scale;
-    const float item_h = 28.0f * scale;
-    const float item_w = (selector_rect.w - grid_gap * 4.0f) / 3.0f;
-    const float start_x = selector_rect.x + grid_gap;
-    const float start_y = selector_rect.y + 12.0f * scale;
-    for (std::size_t i = 0; i < kDemos.size(); ++i) {
-        const int row = static_cast<int>(i) / 3;
-        const int col = static_cast<int>(i) % 3;
-        const Rect item{
-            start_x + static_cast<float>(col) * (item_w + grid_gap),
-            start_y + static_cast<float>(row) * (item_h + grid_gap),
-            item_w,
-            item_h,
-        };
-        const bool is_selected = state.selected_animation_demo == static_cast<int>(i);
-        const bool is_hovered = hovered(input, item);
-        if (is_selected || is_hovered) {
-            draw_fill(ui, item, is_selected ? mix_hex(palette.surface_deep, accent, 0.28f) : palette.surface_deep, item.h * 0.5f, is_selected ? 0.98f : 0.92f);
-            draw_stroke(ui, item, is_selected ? accent : palette.border_soft, item.h * 0.5f, 1.0f, is_selected ? 0.96f : 0.88f);
-        } else {
-            draw_fill(ui, item, palette.surface_deep, item.h * 0.5f, 0.84f);
-        }
-        draw_text_center(ui, kDemos[i].title, item, font_body(scale), is_selected ? palette.text : palette.muted, 0.98f);
-        if (clicked(input, item)) {
-            state.selected_animation_demo = static_cast<int>(i);
-        }
-    }
+                            auto demo_grid = ui.grid(grid_rect)
+                                                 .repeat_rows(3, eui::quick::px(28.0f * scale))
+                                                 .repeat_columns(3, eui::quick::fr())
+                                                 .gap(10.0f * scale)
+                                                 .begin();
+                            for (std::size_t i = 0; i < kDemos.size(); ++i) {
+                                const Rect item = demo_grid.next();
+                                const bool is_selected = state.selected_animation_demo == static_cast<int>(i);
+                                const bool is_hovered = hovered(input, item);
+                                if (is_selected || is_hovered) {
+                                    draw_fill(ui, item,
+                                              is_selected ? mix_hex(palette.surface_deep, accent, 0.28f) : palette.surface_deep,
+                                              item.h * 0.5f, is_selected ? 0.98f : 0.92f);
+                                    draw_stroke(ui, item, is_selected ? accent : palette.border_soft, item.h * 0.5f, 1.0f,
+                                                is_selected ? 0.96f : 0.88f);
+                                } else {
+                                    draw_fill(ui, item, palette.surface_deep, item.h * 0.5f, 0.84f);
+                                }
+                                draw_text_center(ui, kDemos[i].title, item, font_body(scale),
+                                                 is_selected ? palette.text : palette.muted, 0.98f);
+                                if (clicked(input, item)) {
+                                    state.selected_animation_demo = static_cast<int>(i);
+                                }
+                            }
 
-    const float info_y = selector_rect.y + 116.0f * scale;
-    draw_text_left(ui, current.summary,
-                   Rect{selector_rect.x + 14.0f * scale, info_y,
-                        selector_rect.w - 280.0f * scale, 16.0f * scale},
-                   font_meta(scale), palette.muted, 0.96f);
-    draw_fill(ui, Rect{selector_rect.x + selector_rect.w - 236.0f * scale, info_y - 4.0f * scale,
-                       222.0f * scale, 22.0f * scale},
-              palette.surface_deep, 11.0f * scale, 0.96f);
-    draw_stroke(ui, Rect{selector_rect.x + selector_rect.w - 236.0f * scale, info_y - 4.0f * scale,
-                         222.0f * scale, 22.0f * scale},
-                accent, 11.0f * scale, 1.0f, 0.90f);
-    draw_text_center(ui, current.api_label,
-                     Rect{selector_rect.x + selector_rect.w - 236.0f * scale, info_y - 4.0f * scale,
-                          222.0f * scale, 22.0f * scale},
-                     font_meta(scale), mix_hex(palette.text, accent, 0.40f), 0.98f);
+                            ui.row(info_row)
+                                .tracks({eui::quick::fr(), eui::quick::px(222.0f * scale)})
+                                .gap(14.0f * scale)
+                                .begin([&](auto& info_cols) {
+                                    const Rect summary_rect = info_cols.next();
+                                    const Rect api_rect = info_cols.next();
+                                    draw_text_left(ui, current.summary, summary_rect, font_meta(scale), palette.muted, 0.96f);
+                                    draw_fill(ui, api_rect, palette.surface_deep, api_rect.h * 0.5f, 0.96f);
+                                    draw_stroke(ui, api_rect, accent, api_rect.h * 0.5f, 1.0f, 0.90f);
+                                    draw_text_center(ui, current.api_label, api_rect, font_meta(scale), mix_hex(palette.text, accent, 0.40f), 0.98f);
+                                });
+                        });
+                });
 
-    for (std::size_t i = 0; i < kDemos.size(); ++i) {
-        const float mix =
-            ui.presence(ui.id("gallery/animation/view", static_cast<std::uint64_t>(i + 1u)),
-                        state.selected_animation_demo == static_cast<int>(i), 12.0f, 12.0f);
-        if (mix <= 0.01f) {
-            continue;
-        }
-        const float alpha = mix * mix * (3.0f - 2.0f * mix);
-        ui.ctx().set_global_alpha(alpha);
-        ui.clip(stage_rect, [&] {
-            const Rect scene_rect{stage_rect.x + (1.0f - alpha) * 14.0f * scale, stage_rect.y, stage_rect.w, stage_rect.h};
-            draw_demo_scene(ui, static_cast<int>(i), scene_rect, scale, time_seconds, palette);
-        });
-        ui.ctx().set_global_alpha(1.0f);
-    }
-}
-
-void draw_components_page(UI& ui, GalleryState& state, const Rect& rect, float scale) {
-    const std::uint32_t accent = accent_hex(state);
-    const GalleryPalette palette = make_gallery_palette(state);
-    const auto top_bottom = ui.split_v_ratio(rect, 0.40f, 18.0f * scale);
-    const float gap = 14.0f * scale;
-
-    const auto top_cols = ui.split_h_ratio(top_bottom.first, 0.5f, gap);
-    const auto top_left = ui.split_h_ratio(top_cols.first, 0.5f, gap);
-    const auto top_right = ui.split_h_ratio(top_cols.second, 0.5f, gap);
-
-    ui.metric("Build", "Header-only")
-        .in(top_left.first)
-        .tag("core")
-        .caption("One include tree, one renderer path")
-        .label_font(font_body(scale))
-        .value_font(font_heading(scale))
-        .caption_font(font_body(scale))
-        .tag_font(font_meta(scale))
-        .gradient(metric_surface_top_hex(palette), metric_surface_bottom_hex(palette))
-        .stroke(metric_surface_border_hex(palette), 1.0f)
-        .draw();
-    ui.metric("Backends", "GLFW / SDL2")
-        .in(top_left.second)
-        .tag("window")
-        .caption("Selected by source macros")
-        .label_font(font_body(scale))
-        .value_font(font_heading(scale))
-        .caption_font(font_body(scale))
-        .tag_font(font_meta(scale))
-        .gradient(metric_surface_top_hex(palette), metric_surface_bottom_hex(palette))
-        .stroke(metric_surface_border_hex(palette), 1.0f)
-        .draw();
-    ui.metric("Theme", state.light_mode ? "Light" : "Dark")
-        .in(top_right.first)
-        .tag("runtime")
-        .caption("Gallery shell reads live settings")
-        .label_font(font_body(scale))
-        .value_font(font_heading(scale))
-        .caption_font(font_body(scale))
-        .tag_font(font_meta(scale))
-        .gradient(metric_surface_top_hex(palette), metric_surface_bottom_hex(palette))
-        .stroke(metric_surface_border_hex(palette), 1.0f)
-        .draw();
-    ui.metric("Progress", format_percent(state.progress_ratio))
-        .in(top_right.second)
-        .tag("state")
-        .caption("Shared state can feed multiple widgets")
-        .label_font(font_body(scale))
-        .value_font(font_heading(scale))
-        .caption_font(font_body(scale))
-        .tag_font(font_meta(scale))
-        .gradient(metric_surface_top_hex(palette), metric_surface_bottom_hex(palette))
-        .stroke(metric_surface_border_hex(palette), 1.0f)
-        .draw();
-
-    const auto bottom_cols = ui.split_h_ratio(top_bottom.second, 0.50f, 18.0f * scale);
-    ui.card("Readonly, Progress and Button")
-        .in(bottom_cols.first)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto&) {
-            ui.readonly("Renderer", "Modern OpenGL").height(36.0f * scale).draw();
-            ui.readonly("Accent Radius", format_pixels(state.layout_radius)).height(36.0f * scale).draw();
-            ui.progress("Shared Progress", state.progress_ratio).height(10.0f * scale).draw();
-            if (ui.button("Open Settings").secondary().height(38.0f * scale).draw()) {
-                state.selected_page = kPageSettings;
-            }
-        });
-
-    const std::string component_text =
-        "Metric, readonly, progress, card and panel builders are exposed directly from eui::quick::UI.\n\n"
-        "This page groups the higher-level building blocks so the left navigation stays clean and top-level.";
-    ui.card("Text Surface")
-        .in(bottom_cols.second)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto&) {
-            ui.text_area_readonly("Component Notes", component_text).height(236.0f * scale).draw();
+            ui.card("Animation Stage")
+                .in(stage_rect)
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    const Rect scene = card.content();
+                    for (std::size_t i = 0; i < kDemos.size(); ++i) {
+                        const float mix =
+                            ui.presence(ui.id("gallery/animation/view", static_cast<std::uint64_t>(i + 1u)),
+                                        state.selected_animation_demo == static_cast<int>(i), 12.0f, 12.0f);
+                        if (mix <= 0.01f) {
+                            continue;
+                        }
+                        const float alpha = mix * mix * (3.0f - 2.0f * mix);
+                        ui.ctx().set_global_alpha(alpha);
+                        ui.clip(scene, [&] {
+                            const Rect scene_rect{scene.x + (1.0f - alpha) * 14.0f * scale, scene.y, scene.w, scene.h};
+                            draw_demo_scene(ui, static_cast<int>(i), scene_rect, scale, time_seconds, palette);
+                        });
+                        ui.ctx().set_global_alpha(1.0f);
+                    }
+                });
         });
 }
 
 void draw_dashboard_page(UI& ui, const GalleryState& state, const Rect& rect, float scale) {
     const std::uint32_t accent = accent_hex(state);
     const GalleryPalette palette = make_gallery_palette(state);
-    const auto split = ui.split_v_ratio(rect, 0.66f, 18.0f * scale);
-    const Rect preview = split.first;
-    const Rect stats = split.second;
+    ui.column(rect)
+        .tracks({eui::quick::fr(2.1f), eui::quick::fr()})
+        .gap(18.0f * scale)
+        .begin([&](auto& page_rows) {
+            const Rect preview = page_rows.next();
+            const Rect stats = page_rows.next();
 
-    draw_fill(ui, preview, palette.surface_alt, 22.0f * scale, 1.0f);
-    draw_stroke(ui, preview, palette.border, 22.0f * scale, 1.0f, 1.0f);
+            ui.card("Dashboard Preview")
+                .in(preview)
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.row(card.content())
+                        .tracks({eui::quick::px(120.0f * scale), eui::quick::fr()})
+                        .gap(16.0f * scale)
+                        .begin([&](auto& cols) {
+                            const Rect sidebar = cols.next();
+                            const Rect main = cols.next();
 
-    const Rect shell = inset_rect(preview, 18.0f * scale);
-    const Rect sidebar{shell.x, shell.y, 120.0f * scale, shell.h};
-    const Rect main{sidebar.x + sidebar.w + 16.0f * scale, shell.y, shell.w - sidebar.w - 16.0f * scale, shell.h};
-    const Rect hero{main.x, main.y, main.w, 76.0f * scale};
-    const Rect cards_row{main.x, hero.y + hero.h + 14.0f * scale, main.w, 94.0f * scale};
-    const Rect activity{main.x, cards_row.y + cards_row.h + 14.0f * scale, main.w, main.h - hero.h - cards_row.h - 28.0f * scale};
+                            draw_fill(ui, sidebar, palette.surface_deep, 18.0f * scale, 0.98f);
+                            draw_stroke(ui, sidebar, palette.border_soft, 18.0f * scale, 1.0f, 0.96f);
+                            draw_text_left(ui, "Dashboard",
+                                           Rect{sidebar.x + 14.0f * scale, sidebar.y + 16.0f * scale, sidebar.w - 28.0f * scale, 18.0f * scale},
+                                           font_heading(scale), palette.text, 1.0f);
+                            for (int i = 0; i < 4; ++i) {
+                                const Rect item{sidebar.x + 12.0f * scale, sidebar.y + 48.0f * scale + static_cast<float>(i) * 42.0f * scale,
+                                                sidebar.w - 24.0f * scale, 30.0f * scale};
+                                draw_fill(ui, item, i == 1 ? nav_selected_fill_hex(palette) : nav_idle_fill_hex(palette), 15.0f * scale,
+                                          i == 1 ? 0.98f : 0.84f);
+                                draw_text_left(ui, i == 0 ? "Overview" : i == 1 ? "Orders" : i == 2 ? "Activity" : "Settings",
+                                               Rect{item.x + 12.0f * scale, item.y + 7.0f * scale, item.w - 24.0f * scale, 16.0f * scale},
+                                               font_body(scale), i == 1 ? palette.text : palette.muted, 0.98f);
+                            }
 
-    draw_fill(ui, sidebar, palette.surface_deep, 18.0f * scale, 0.98f);
-    draw_stroke(ui, sidebar, palette.border_soft, 18.0f * scale, 1.0f, 0.96f);
-    draw_text_left(ui, "Dashboard", Rect{sidebar.x + 14.0f * scale, sidebar.y + 16.0f * scale, sidebar.w - 28.0f * scale, 18.0f * scale},
-                   font_heading(scale), palette.text, 1.0f);
-    for (int i = 0; i < 4; ++i) {
-        const Rect item{sidebar.x + 12.0f * scale, sidebar.y + 48.0f * scale + static_cast<float>(i) * 42.0f * scale,
-                        sidebar.w - 24.0f * scale, 30.0f * scale};
-        draw_fill(ui, item, i == 1 ? nav_selected_fill_hex(palette) : nav_idle_fill_hex(palette), 15.0f * scale,
-                  i == 1 ? 0.98f : 0.84f);
-        draw_text_left(ui, i == 0 ? "Overview" : i == 1 ? "Orders" : i == 2 ? "Activity" : "Settings",
-                       Rect{item.x + 12.0f * scale, item.y + 7.0f * scale, item.w - 24.0f * scale, 16.0f * scale},
-                       font_body(scale), i == 1 ? palette.text : palette.muted, 0.98f);
-    }
+                            ui.column(main)
+                                .tracks({eui::quick::px(76.0f * scale), eui::quick::px(94.0f * scale), eui::quick::fr()})
+                                .gap(14.0f * scale)
+                                .begin([&](auto& main_rows) {
+                                    const Rect hero = main_rows.next();
+                                    const Rect cards_row = main_rows.next();
+                                    const Rect activity = main_rows.next();
 
-    draw_fill(ui, hero, palette.surface_deep, 18.0f * scale, 0.98f);
-    draw_stroke(ui, hero, palette.border_soft, 18.0f * scale, 1.0f, 0.96f);
-    draw_text_left(ui, "Dashboard Preview", Rect{hero.x + 18.0f * scale, hero.y + 14.0f * scale, hero.w - 36.0f * scale, 18.0f * scale},
-                   font_heading(scale), palette.text, 1.0f);
-    draw_text_left(ui, "The full standalone example remains available as reference_dashboard_demo.cpp",
-                   Rect{hero.x + 18.0f * scale, hero.y + 40.0f * scale, hero.w - 36.0f * scale, 16.0f * scale},
-                   font_meta(scale), palette.muted, 0.96f);
+                                    draw_fill(ui, hero, palette.surface_deep, 18.0f * scale, 0.98f);
+                                    draw_stroke(ui, hero, palette.border_soft, 18.0f * scale, 1.0f, 0.96f);
+                                    draw_text_left(ui, "Dashboard Preview",
+                                                   Rect{hero.x + 18.0f * scale, hero.y + 14.0f * scale, hero.w - 36.0f * scale, 18.0f * scale},
+                                                   font_heading(scale), palette.text, 1.0f);
+                                    draw_text_left(ui, "The full standalone example remains available as reference_dashboard_demo.cpp",
+                                                   Rect{hero.x + 18.0f * scale, hero.y + 40.0f * scale, hero.w - 36.0f * scale, 16.0f * scale},
+                                                   font_meta(scale), palette.muted, 0.96f);
 
-    const auto cards = ui.split_h_ratio(cards_row, 0.33f, 12.0f * scale);
-    const auto cards_right = ui.split_h_ratio(cards.second, 0.5f, 12.0f * scale);
-    ui.metric("Revenue", "$128k").in(cards.first).tag("up").caption("Month over month +18%")
-        .label_font(font_body(scale)).value_font(font_heading(scale)).caption_font(font_body(scale)).tag_font(font_meta(scale))
-        .gradient(mix_hex(palette.surface_deep, accent, 0.10f), mix_hex(palette.surface_alt, accent, 0.18f)).draw();
-    ui.metric("Orders", "1,284").in(cards_right.first).tag("live").caption("Refreshed from shared state")
-        .label_font(font_body(scale)).value_font(font_heading(scale)).caption_font(font_body(scale)).tag_font(font_meta(scale))
-        .gradient(mix_hex(palette.surface_deep, accent, 0.10f), mix_hex(palette.surface_alt, accent, 0.18f)).draw();
-    ui.metric("Retention", "92%").in(cards_right.second).tag("stable").caption("Reusable metric surface")
-        .label_font(font_body(scale)).value_font(font_heading(scale)).caption_font(font_body(scale)).tag_font(font_meta(scale))
-        .gradient(mix_hex(palette.surface_deep, accent, 0.10f), mix_hex(palette.surface_alt, accent, 0.18f)).draw();
+                                    ui.row(cards_row)
+                                        .tracks({eui::quick::fr(), eui::quick::fr(), eui::quick::fr()})
+                                        .gap(12.0f * scale)
+                                        .begin([&](auto& metric_cols) {
+                                            ui.metric("Revenue", "$128k").in(metric_cols.next()).tag("up").caption("Month over month +18%")
+                                                .label_font(font_body(scale)).value_font(font_heading(scale)).caption_font(font_body(scale)).tag_font(font_meta(scale))
+                                                .gradient(mix_hex(palette.surface_deep, accent, 0.10f), mix_hex(palette.surface_alt, accent, 0.18f)).draw();
+                                            ui.metric("Orders", "1,284").in(metric_cols.next()).tag("live").caption("Refreshed from shared state")
+                                                .label_font(font_body(scale)).value_font(font_heading(scale)).caption_font(font_body(scale)).tag_font(font_meta(scale))
+                                                .gradient(mix_hex(palette.surface_deep, accent, 0.10f), mix_hex(palette.surface_alt, accent, 0.18f)).draw();
+                                            ui.metric("Retention", "92%").in(metric_cols.next()).tag("stable").caption("Reusable metric surface")
+                                                .label_font(font_body(scale)).value_font(font_heading(scale)).caption_font(font_body(scale)).tag_font(font_meta(scale))
+                                                .gradient(mix_hex(palette.surface_deep, accent, 0.10f), mix_hex(palette.surface_alt, accent, 0.18f)).draw();
+                                        });
 
-    draw_fill(ui, activity, palette.surface_deep, 18.0f * scale, 0.98f);
-    draw_stroke(ui, activity, palette.border_soft, 18.0f * scale, 1.0f, 0.96f);
-    draw_text_left(ui, "Activity", Rect{activity.x + 18.0f * scale, activity.y + 14.0f * scale, 120.0f * scale, 18.0f * scale},
-                   font_heading(scale), palette.text, 1.0f);
-    const float plot_bottom = activity.y + activity.h - 26.0f * scale;
-    float bar_x = activity.x + 24.0f * scale;
-    for (int i = 0; i < 7; ++i) {
-        const float height = (0.28f + static_cast<float>((i * 37) % 53) / 100.0f) * (activity.h - 66.0f * scale);
-        draw_fill(ui, Rect{bar_x, plot_bottom - height, 18.0f * scale, height},
-                  i == 5 ? accent : demo_track_hex(palette), 9.0f * scale, i == 5 ? 0.98f : 0.86f);
-        bar_x += 28.0f * scale;
-    }
+                                    draw_fill(ui, activity, palette.surface_deep, 18.0f * scale, 0.98f);
+                                    draw_stroke(ui, activity, palette.border_soft, 18.0f * scale, 1.0f, 0.96f);
+                                    draw_text_left(ui, "Activity",
+                                                   Rect{activity.x + 18.0f * scale, activity.y + 14.0f * scale, 120.0f * scale, 18.0f * scale},
+                                                   font_heading(scale), palette.text, 1.0f);
+                                    const float plot_bottom = activity.y + activity.h - 26.0f * scale;
+                                    float bar_x = activity.x + 24.0f * scale;
+                                    for (int i = 0; i < 7; ++i) {
+                                        const float height = (0.28f + static_cast<float>((i * 37) % 53) / 100.0f) * (activity.h - 66.0f * scale);
+                                        draw_fill(ui, Rect{bar_x, plot_bottom - height, 18.0f * scale, height},
+                                                  i == 5 ? accent : demo_track_hex(palette), 9.0f * scale, i == 5 ? 0.98f : 0.86f);
+                                        bar_x += 28.0f * scale;
+                                    }
+                                });
+                        });
+                });
 
-    const auto stats_cols = ui.split_h_ratio(stats, 0.5f, 18.0f * scale);
-    ui.card("What This Proves")
-        .in(stats_cols.first)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto&) {
-            ui.readonly("Composition", "Sidebar + cards + chart + metrics").height(36.0f * scale).draw();
-            ui.readonly("Reuse", "Same primitives power the standalone dashboard").height(36.0f * scale).draw();
-        });
-    ui.card("Usage")
-        .in(stats_cols.second)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto&) {
-            ui.text_area_readonly("Standalone File", "reference_dashboard_demo.cpp remains as the dedicated dashboard example target.")
-                .height(120.0f * scale)
-                .draw();
+            ui.row(stats)
+                .tracks({eui::quick::fr(), eui::quick::fr()})
+                .gap(18.0f * scale)
+                .begin([&](auto& stats_cols) {
+                    ui.card("What This Proves")
+                        .in(stats_cols.next())
+                        .title_font(font_heading(scale))
+                        .radius(22.0f * scale)
+                        .fill(palette.surface_alt)
+                        .stroke(palette.border, 1.0f)
+                        .begin([&](auto& card) {
+                            ui.column(card.content())
+                                .tracks({eui::quick::px(36.0f * scale), eui::quick::px(36.0f * scale)})
+                                .gap(8.0f * scale)
+                                .begin([&](auto& info_rows) {
+                                    ui.readonly("Composition", "Sidebar + cards + chart + metrics")
+                                        .in(info_rows.next())
+                                        .height(36.0f * scale)
+                                        .draw();
+                                    ui.readonly("Reuse", "Same primitives power the standalone dashboard")
+                                        .in(info_rows.next())
+                                        .height(36.0f * scale)
+                                        .draw();
+                                });
+                        });
+                    ui.card("Usage")
+                        .in(stats_cols.next())
+                        .title_font(font_heading(scale))
+                        .radius(22.0f * scale)
+                        .fill(palette.surface_alt)
+                        .stroke(palette.border, 1.0f)
+                        .begin([&](auto&) {
+                            ui.text_area_readonly("Standalone File", "reference_dashboard_demo.cpp remains as the dedicated dashboard example target.")
+                                .height(120.0f * scale)
+                                .draw();
+                        });
+                });
         });
 }
 
 void draw_settings_page(UI& ui, const eui::InputState& input, GalleryState& state, const Rect& rect, float scale) {
     const GalleryPalette palette = make_gallery_palette(state);
-    const auto split = ui.split_h_ratio(rect, 0.54f, 18.0f * scale);
+    ui.row(rect)
+        .tracks({eui::quick::fr(1.08f), eui::quick::fr(0.92f)})
+        .gap(18.0f * scale)
+        .begin([&](auto& cols) {
+            const Rect settings_rect = cols.next();
+            const Rect preview_rect = cols.next();
 
-    ui.card("Gallery Settings")
-        .in(split.first)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto& card) {
-            const Rect mode_label = card.dock_top(14.0f * scale, 6.0f * scale);
-            const Rect mode_row = card.dock_top(38.0f * scale, 14.0f * scale);
-            const Rect accent_label = card.dock_top(14.0f * scale, 6.0f * scale);
-            const Rect accent_row = card.dock_top(40.0f * scale, 16.0f * scale);
-            const Rect custom_label = card.dock_top(14.0f * scale, 6.0f * scale);
-            const Rect custom_row = card.dock_top(42.0f * scale, 12.0f * scale);
+            ui.card("Gallery Settings")
+                .in(settings_rect)
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    ui.view(card.content())
+                        .column()
+                        .tracks({eui::quick::px(14.0f * scale), eui::quick::px(38.0f * scale), eui::quick::px(14.0f * scale),
+                                 eui::quick::px(40.0f * scale), eui::quick::px(14.0f * scale), eui::quick::px(42.0f * scale),
+                                 eui::quick::px(36.0f * scale), eui::quick::px(36.0f * scale), eui::quick::px(36.0f * scale),
+                                 eui::quick::px(36.0f * scale), eui::quick::px(36.0f * scale)})
+                        .gap(12.0f * scale)
+                        .begin([&](auto& rows) {
+                            const Rect mode_label = rows.next();
+                            const Rect mode_row = rows.next();
+                            const Rect accent_label = rows.next();
+                            const Rect accent_row = rows.next();
+                            const Rect custom_label = rows.next();
+                            const Rect custom_row = rows.next();
+                            const Rect red_row = rows.next();
+                            const Rect green_row = rows.next();
+                            const Rect blue_row = rows.next();
+                            const Rect radius_row = rows.next();
+                            const Rect blur_row = rows.next();
 
-            draw_text_left(ui, "Theme Mode", mode_label, font_meta(scale), palette.muted, 0.96f);
-            const auto mode_split = ui.split_h_ratio(mode_row, 0.5f, 10.0f * scale);
-            const Rect dark_rect = mode_split.first;
-            const Rect light_rect = mode_split.second;
-            const std::uint32_t accent = accent_hex(state);
-            draw_fill(ui, dark_rect, state.light_mode ? palette.surface_deep : nav_selected_fill_hex(palette), dark_rect.h * 0.5f, 0.98f);
-            draw_stroke(ui, dark_rect, state.light_mode ? palette.border_soft : accent, dark_rect.h * 0.5f, 1.0f, 0.96f);
-            draw_text_center(ui, "Dark", dark_rect, font_body(scale), state.light_mode ? palette.muted : palette.text, 0.98f);
-            draw_fill(ui, light_rect, state.light_mode ? nav_selected_fill_hex(palette) : palette.surface_deep, light_rect.h * 0.5f, 0.98f);
-            draw_stroke(ui, light_rect, state.light_mode ? accent : palette.border_soft, light_rect.h * 0.5f, 1.0f, 0.96f);
-            draw_text_center(ui, "Light", light_rect, font_body(scale), state.light_mode ? palette.text : palette.muted, 0.98f);
-            if (clicked(input, dark_rect)) {
-                state.light_mode = false;
-            }
-            if (clicked(input, light_rect)) {
-                state.light_mode = true;
-            }
+                            draw_text_left(ui, "Theme Mode", mode_label, font_meta(scale), palette.muted, 0.96f);
+                            ui.row(mode_row)
+                                .tracks({eui::quick::fr(), eui::quick::fr()})
+                                .gap(10.0f * scale)
+                                .begin([&](auto& mode_cols) {
+                                    const Rect dark_rect = mode_cols.next();
+                                    const Rect light_rect = mode_cols.next();
+                                    const std::uint32_t accent = accent_hex(state);
+                                    draw_fill(ui, dark_rect, state.light_mode ? palette.surface_deep : nav_selected_fill_hex(palette), dark_rect.h * 0.5f, 0.98f);
+                                    draw_stroke(ui, dark_rect, state.light_mode ? palette.border_soft : accent, dark_rect.h * 0.5f, 1.0f, 0.96f);
+                                    draw_text_center(ui, "Dark", dark_rect, font_body(scale), state.light_mode ? palette.muted : palette.text, 0.98f);
+                                    draw_fill(ui, light_rect, state.light_mode ? nav_selected_fill_hex(palette) : palette.surface_deep, light_rect.h * 0.5f, 0.98f);
+                                    draw_stroke(ui, light_rect, state.light_mode ? accent : palette.border_soft, light_rect.h * 0.5f, 1.0f, 0.96f);
+                                    draw_text_center(ui, "Light", light_rect, font_body(scale), state.light_mode ? palette.text : palette.muted, 0.98f);
+                                    if (clicked(input, dark_rect)) {
+                                        state.light_mode = false;
+                                    }
+                                    if (clicked(input, light_rect)) {
+                                        state.light_mode = true;
+                                    }
+                                });
 
-            draw_text_left(ui, "Accent Color", accent_label, font_meta(scale), palette.muted, 0.96f);
-            const float swatch = 28.0f * scale;
-            const float swatch_gap = 10.0f * scale;
-            float swatch_x = accent_row.x;
-            const int active_accent = accent_uses_custom_rgb(state) ? custom_accent_slot() : state.accent_index;
-            for (int i = 0; i <= custom_accent_slot(); ++i) {
-                const std::uint32_t swatch_hex =
-                    i == custom_accent_slot() ? custom_accent_hex(state) : kAccentHexes[static_cast<std::size_t>(i)];
-                const Rect chip{swatch_x, accent_row.y + 6.0f * scale, swatch, swatch};
-                draw_fill(ui, chip, swatch_hex, chip.w * 0.5f, 0.98f);
-                if (i == custom_accent_slot()) {
-                    draw_stroke(ui, Rect{chip.x + 4.0f * scale, chip.y + 4.0f * scale, chip.w - 8.0f * scale, chip.h - 8.0f * scale},
-                                palette.surface_alt, (chip.w - 8.0f * scale) * 0.5f, 1.0f, 0.90f);
-                }
-                if (active_accent == i) {
-                    draw_stroke(ui, Rect{chip.x - 3.0f, chip.y - 3.0f, chip.w + 6.0f, chip.h + 6.0f},
-                                palette.text, (chip.w + 6.0f) * 0.5f, 1.0f, 0.92f);
-                }
-                if (clicked(input, Rect{chip.x - 4.0f, chip.y - 4.0f, chip.w + 8.0f, chip.h + 8.0f})) {
-                    state.accent_index = i;
-                }
-                swatch_x += swatch + swatch_gap;
-            }
+                            draw_text_left(ui, "Accent Color", accent_label, font_meta(scale), palette.muted, 0.96f);
+                            const float swatch = 28.0f * scale;
+                            const int active_accent = accent_uses_custom_rgb(state) ? custom_accent_slot() : state.accent_index;
+                            ui.row(accent_row)
+                                .repeat(static_cast<std::size_t>(custom_accent_slot() + 1), eui::quick::px(swatch))
+                                .gap(10.0f * scale)
+                                .begin([&](auto& chips) {
+                                    for (int i = 0; i <= custom_accent_slot(); ++i) {
+                                        const std::uint32_t swatch_hex =
+                                            i == custom_accent_slot() ? custom_accent_hex(state) : kAccentHexes[static_cast<std::size_t>(i)];
+                                        const Rect chip = chips.next();
+                                        draw_fill(ui, chip, swatch_hex, chip.w * 0.5f, 0.98f);
+                                        if (i == custom_accent_slot()) {
+                                            draw_stroke(ui, Rect{chip.x + 4.0f * scale, chip.y + 4.0f * scale, chip.w - 8.0f * scale, chip.h - 8.0f * scale},
+                                                        palette.surface_alt, (chip.w - 8.0f * scale) * 0.5f, 1.0f, 0.90f);
+                                        }
+                                        if (active_accent == i) {
+                                            draw_stroke(ui, Rect{chip.x - 3.0f, chip.y - 3.0f, chip.w + 6.0f, chip.h + 6.0f},
+                                                        palette.text, (chip.w + 6.0f) * 0.5f, 1.0f, 0.92f);
+                                        }
+                                        if (clicked(input, Rect{chip.x - 4.0f, chip.y - 4.0f, chip.w + 8.0f, chip.h + 8.0f})) {
+                                            state.accent_index = i;
+                                        }
+                                    }
+                                });
 
-            draw_text_left(ui, "Custom RGB", custom_label, font_meta(scale), palette.muted, 0.96f);
-            const auto custom_split = ui.split_h_ratio(custom_row, 0.24f, 10.0f * scale);
-            const Rect custom_chip = custom_split.first;
-            const Rect custom_info = custom_split.second;
-            const std::uint32_t custom_hex = custom_accent_hex(state);
-            draw_fill(ui, custom_chip, custom_hex, 14.0f * scale, 0.98f);
-            draw_stroke(ui, custom_chip,
-                        active_accent == custom_accent_slot() ? palette.text : palette.border_soft,
-                        14.0f * scale, 1.0f, active_accent == custom_accent_slot() ? 0.94f : 0.86f);
-            draw_fill(ui, custom_info, palette.surface_deep, custom_info.h * 0.5f, 0.96f);
-            draw_stroke(ui, custom_info, palette.border_soft, custom_info.h * 0.5f, 1.0f, 0.86f);
-            draw_text_left(ui, "Live custom accent",
-                           Rect{custom_info.x + 12.0f * scale, custom_info.y + 6.0f * scale,
-                                custom_info.w - 24.0f * scale, 14.0f * scale},
-                           font_meta(scale), palette.muted, 0.96f);
-            draw_text_left(ui, format_hex_color(custom_hex),
-                           Rect{custom_info.x + 12.0f * scale, custom_info.y + 20.0f * scale,
-                                custom_info.w - 24.0f * scale, 16.0f * scale},
-                           font_body(scale), palette.text, 0.98f);
-            if (clicked(input, custom_row)) {
-                state.accent_index = custom_accent_slot();
-            }
+                            draw_text_left(ui, "Custom RGB", custom_label, font_meta(scale), palette.muted, 0.96f);
+                            ui.row(custom_row)
+                                .tracks({eui::quick::fr(0.24f), eui::quick::fr(0.76f)})
+                                .gap(10.0f * scale)
+                                .begin([&](auto& custom_cols) {
+                                    const Rect custom_chip = custom_cols.next();
+                                    const Rect custom_info = custom_cols.next();
+                                    const std::uint32_t custom_hex = custom_accent_hex(state);
+                                    draw_fill(ui, custom_chip, custom_hex, 14.0f * scale, 0.98f);
+                                    draw_stroke(ui, custom_chip,
+                                                active_accent == custom_accent_slot() ? palette.text : palette.border_soft,
+                                                14.0f * scale, 1.0f, active_accent == custom_accent_slot() ? 0.94f : 0.86f);
+                                    draw_fill(ui, custom_info, palette.surface_deep, custom_info.h * 0.5f, 0.96f);
+                                    draw_stroke(ui, custom_info, palette.border_soft, custom_info.h * 0.5f, 1.0f, 0.86f);
+                                    draw_text_left(ui, "Live custom accent",
+                                                   Rect{custom_info.x + 12.0f * scale, custom_info.y + 6.0f * scale,
+                                                        custom_info.w - 24.0f * scale, 14.0f * scale},
+                                                   font_meta(scale), palette.muted, 0.96f);
+                                    draw_text_left(ui, format_hex_color(custom_hex),
+                                                   Rect{custom_info.x + 12.0f * scale, custom_info.y + 20.0f * scale,
+                                                        custom_info.w - 24.0f * scale, 16.0f * scale},
+                                                   font_body(scale), palette.text, 0.98f);
+                                    if (clicked(input, custom_row)) {
+                                        state.accent_index = custom_accent_slot();
+                                    }
+                                });
 
-            if (ui.slider("Red", state.custom_accent_r).range(0.0f, 255.0f).decimals(0).height(36.0f * scale).draw()) {
-                state.accent_index = custom_accent_slot();
-            }
-            if (ui.slider("Green", state.custom_accent_g).range(0.0f, 255.0f).decimals(0).height(36.0f * scale).draw()) {
-                state.accent_index = custom_accent_slot();
-            }
-            if (ui.slider("Blue", state.custom_accent_b).range(0.0f, 255.0f).decimals(0).height(36.0f * scale).draw()) {
-                state.accent_index = custom_accent_slot();
-            }
-            ui.slider("Corner Radius", state.layout_radius).range(8.0f, 28.0f).decimals(0).height(36.0f * scale).draw();
-            ui.slider("Glass Blur", state.settings_blur).range(0.0f, 28.0f).decimals(0).height(36.0f * scale).draw();
-        });
+                            if (ui.slider("Red", state.custom_accent_r).in(red_row).range(0.0f, 255.0f).decimals(0).draw()) {
+                                state.accent_index = custom_accent_slot();
+                            }
+                            if (ui.slider("Green", state.custom_accent_g).in(green_row).range(0.0f, 255.0f).decimals(0).draw()) {
+                                state.accent_index = custom_accent_slot();
+                            }
+                            if (ui.slider("Blue", state.custom_accent_b).in(blue_row).range(0.0f, 255.0f).decimals(0).draw()) {
+                                state.accent_index = custom_accent_slot();
+                            }
+                            ui.slider("Corner Radius", state.layout_radius).in(radius_row).range(8.0f, 28.0f).decimals(0).draw();
+                            ui.slider("Glass Blur", state.settings_blur).in(blur_row).range(0.0f, 28.0f).decimals(0).draw();
+                        });
+                });
 
-    ui.card("Live Preview")
-        .in(split.second)
-        .title_font(font_heading(scale))
-        .radius(22.0f * scale)
-        .fill(palette.surface_alt)
-        .stroke(palette.border, 1.0f)
-        .begin([&](auto& card) {
-            const std::uint32_t accent = accent_hex(state);
-            const float preview_radius = state.layout_radius * scale;
-            const Rect preview = inset_rect(card.content(), 6.0f * scale);
-            ui.clip(preview, [&] {
-                draw_fill(ui, preview, preview_backdrop_hex(palette), preview_radius, 1.0f);
-                draw_stroke(ui, preview, accent, preview_radius, 1.0f, 0.76f);
-                const Rect inner = inset_rect(preview, 18.0f * scale);
-                draw_stage_background(ui, inner, scale, make_gallery_palette(state));
-                draw_blur_reference(ui, inset_rect(inner, 34.0f * scale), scale * 0.82f, palette);
-                draw_actor(ui,
-                           Rect{inner.x + inner.w * 0.5f - 80.0f * scale, inner.y + inner.h * 0.5f - 50.0f * scale,
-                                160.0f * scale, 100.0f * scale},
-                           scale, palette, actor_glass_top_hex(palette), actor_glass_bottom_hex(palette), 1.0f,
-                           state.settings_blur * scale, state.settings_blur * scale, 0.0f, 0.0f, 1.0f, 0.0f, 0.18f);
-            });
+            ui.card("Live Preview")
+                .in(preview_rect)
+                .title_font(font_heading(scale))
+                .radius(22.0f * scale)
+                .fill(palette.surface_alt)
+                .stroke(palette.border, 1.0f)
+                .begin([&](auto& card) {
+                    const std::uint32_t accent = accent_hex(state);
+                    const float preview_radius = state.layout_radius * scale;
+                    const Rect preview = inset_rect(card.content(), 6.0f * scale);
+                    ui.clip(preview, [&] {
+                        draw_fill(ui, preview, preview_backdrop_hex(palette), preview_radius, 1.0f);
+                        draw_stroke(ui, preview, accent, preview_radius, 1.0f, 0.76f);
+                        const Rect inner = inset_rect(preview, 18.0f * scale);
+                        draw_stage_background(ui, inner, scale, make_gallery_palette(state));
+                        draw_blur_reference(ui, inset_rect(inner, 34.0f * scale), scale * 0.82f, palette);
+                        draw_actor(ui,
+                                   Rect{inner.x + inner.w * 0.5f - 80.0f * scale, inner.y + inner.h * 0.5f - 50.0f * scale,
+                                        160.0f * scale, 100.0f * scale},
+                                   scale, palette, actor_glass_top_hex(palette), actor_glass_bottom_hex(palette), 1.0f,
+                                   state.settings_blur * scale, state.settings_blur * scale, 0.0f, 0.0f, 1.0f, 0.0f, 0.18f);
+                    });
+                });
         });
 }
 
 void draw_about_page(UI& ui, const eui::InputState& input, const GalleryState& state, const Rect& rect, float scale) {
     const GalleryPalette palette = make_gallery_palette(state);
     const std::uint32_t accent = accent_hex(state);
-
-    draw_fill(ui, rect, palette.surface_alt, 24.0f * scale, 1.0f);
-    draw_stroke(ui, rect, palette.border, 24.0f * scale, 1.0f, 1.0f);
-
     const Rect content = inset_rect(rect, 32.0f * scale);
     const float hero_w = std::min(content.w, 720.0f * scale);
     const float hero_h = std::min(content.h * 0.44f, 236.0f * scale);
-    const Rect hero{
-        content.x + (content.w - hero_w) * 0.5f,
-        content.y + 6.0f * scale,
-        hero_w,
-        hero_h,
-    };
 
-    draw_fill(ui, hero, palette.surface_deep, 24.0f * scale, 0.96f);
-    draw_stroke(ui, hero, mix_hex(palette.border_soft, accent, 0.18f), 24.0f * scale, 1.0f, 0.90f);
-    draw_text_center(ui, "EUI", Rect{hero.x, hero.y + 20.0f * scale, hero.w, 22.0f * scale},
-                     font_heading(scale) * 2.0f, mix_hex(palette.text, accent, 0.24f), 0.98f);
-    draw_text_center(ui, "Created by SudoEvolve",
-                     Rect{hero.x, hero.y + 50.0f * scale, hero.w, 18.0f * scale},
-                     font_body(scale), palette.text, 0.98f);
-    draw_text_center(ui,
-                     "Immediate-mode GUI with crisp text, modern surfaces, reusable controls and fast iteration for desktop tooling.",
-                     Rect{hero.x + 28.0f * scale, hero.y + 60.0f * scale, hero.w - 56.0f * scale, 38.0f * scale},
-                     font_body(scale), palette.muted, 0.98f);
+    ui.view(content)
+        .column()
+        .tracks({eui::quick::px(hero_h), eui::quick::fr()})
+        .gap(18.0f * scale)
+        .begin([&](auto& rows) {
+            const Rect hero_slot = rows.next();
+            const Rect info_area = rows.next();
 
-    const float buttons_w = std::min(hero.w - 64.0f * scale, 420.0f * scale);
-    const Rect buttons_row{
-        hero.x + (hero.w - buttons_w) * 0.5f,
-        hero.y + hero.h - 80.0f * scale,
-        buttons_w,
-        42.0f * scale,
-    };
-    const auto button_split = ui.split_h_ratio(buttons_row, 0.5f, 16.0f * scale);
-    const Rect github_button = button_split.first;
-    const Rect mail_button = button_split.second;
+            ui.row(hero_slot)
+                .tracks({eui::quick::fr(), eui::quick::px(hero_w), eui::quick::fr()})
+                .begin([&](auto& hero_cols) {
+                    hero_cols.next();
+                    const Rect hero = hero_cols.next();
 
-    const bool github_hovered = hovered(input, github_button);
-    const bool mail_hovered = hovered(input, mail_button);
-    const float github_mix = ui.presence(ui.id("gallery/about/github"), github_hovered, 18.0f, 12.0f);
-    const float mail_mix = ui.presence(ui.id("gallery/about/mail"), mail_hovered, 18.0f, 12.0f);
+                    draw_fill(ui, hero, palette.surface_deep, 24.0f * scale, 0.96f);
+                    draw_stroke(ui, hero, mix_hex(palette.border_soft, accent, 0.18f), 24.0f * scale, 1.0f, 0.90f);
+                    draw_text_center(ui, "EUI", Rect{hero.x, hero.y + 20.0f * scale, hero.w, 22.0f * scale},
+                                     font_heading(scale) * 2.0f, mix_hex(palette.text, accent, 0.24f), 0.98f);
+                    draw_text_center(ui, "Created by SudoEvolve",
+                                     Rect{hero.x, hero.y + 50.0f * scale, hero.w, 18.0f * scale},
+                                     font_body(scale), palette.text, 0.98f);
+                    draw_text_center(ui,
+                                     "Immediate-mode GUI with crisp text, modern surfaces, reusable controls and fast iteration for desktop tooling.",
+                                     Rect{hero.x + 28.0f * scale, hero.y + 60.0f * scale, hero.w - 56.0f * scale, 38.0f * scale},
+                                     font_body(scale), palette.muted, 0.98f);
 
-    draw_fill(ui, github_button, mix_hex(palette.accent, 0xFFFFFF, palette.light ? 0.14f : 0.04f * github_mix),
-              github_button.h * 0.5f, 0.98f);
-    draw_stroke(ui, github_button, mix_hex(palette.accent, palette.text, 0.12f), github_button.h * 0.5f, 1.0f, 0.94f);
-    draw_icon(ui, 0xF121u,
-              Rect{github_button.x + 24.0f * scale, github_button.y + 13.0f * scale, 18.0f * scale, 18.0f * scale},
-              palette.light ? 0x0F172A : 0xFFFFFF, 0.98f);
-    draw_text_left(ui, "GitHub",
-                   Rect{github_button.x + 52.0f * scale, github_button.y + 13.0f * scale,
-                        github_button.w - 68.0f * scale, 18.0f * scale},
-                   font_body(scale), palette.light ? 0x0F172A : 0xFFFFFF, 0.98f);
+                    const float buttons_w = std::min(hero.w - 64.0f * scale, 420.0f * scale);
+                    const Rect buttons_row{
+                        hero.x + (hero.w - buttons_w) * 0.5f,
+                        hero.y + hero.h - 80.0f * scale,
+                        buttons_w,
+                        42.0f * scale,
+                    };
+                    ui.row(buttons_row)
+                        .tracks({eui::quick::fr(), eui::quick::fr()})
+                        .gap(16.0f * scale)
+                        .begin([&](auto& button_cols) {
+                            const Rect github_button = button_cols.next();
+                            const Rect mail_button = button_cols.next();
+                            const bool github_hovered = hovered(input, github_button);
+                            const bool mail_hovered = hovered(input, mail_button);
+                            const float github_mix = ui.presence(ui.id("gallery/about/github"), github_hovered, 18.0f, 12.0f);
+                            const float mail_mix = ui.presence(ui.id("gallery/about/mail"), mail_hovered, 18.0f, 12.0f);
 
-    draw_fill(ui, mail_button, palette.surface_deep, mail_button.h * 0.5f, 0.96f);
-    draw_stroke(ui, mail_button, mix_hex(palette.border_soft, accent, 0.20f + 0.18f * mail_mix), mail_button.h * 0.5f, 1.0f, 0.90f);
-    draw_icon(ui, 0xF0E0u,
-              Rect{mail_button.x + 24.0f * scale, mail_button.y + 13.0f * scale, 18.0f * scale, 18.0f * scale},
-              palette.text, 0.98f);
-    draw_text_left(ui, "Email",
-                   Rect{mail_button.x + 52.0f * scale, mail_button.y + 13.0f * scale, mail_button.w - 68.0f * scale, 18.0f * scale},
-                   font_body(scale), palette.text, 0.98f);
+                            draw_fill(ui, github_button, mix_hex(palette.accent, 0xFFFFFF, palette.light ? 0.14f : 0.04f * github_mix),
+                                      github_button.h * 0.5f, 0.98f);
+                            draw_stroke(ui, github_button, mix_hex(palette.accent, palette.text, 0.12f), github_button.h * 0.5f, 1.0f, 0.94f);
+                            draw_icon(ui, 0xF121u,
+                                      Rect{github_button.x + 24.0f * scale, github_button.y + 13.0f * scale, 18.0f * scale, 18.0f * scale},
+                                      palette.light ? 0x0F172A : 0xFFFFFF, 0.98f);
+                            draw_text_left(ui, "GitHub",
+                                           Rect{github_button.x + 52.0f * scale, github_button.y + 13.0f * scale,
+                                                github_button.w - 68.0f * scale, 18.0f * scale},
+                                           font_body(scale), palette.light ? 0x0F172A : 0xFFFFFF, 0.98f);
 
-    if (clicked(input, github_button)) {
-        open_external_uri("https://github.com/sudoevolve");
-    }
-    if (clicked(input, mail_button)) {
-        open_external_uri("mailto:sudoevolve@gmail.com");
-    }
+                            draw_fill(ui, mail_button, palette.surface_deep, mail_button.h * 0.5f, 0.96f);
+                            draw_stroke(ui, mail_button, mix_hex(palette.border_soft, accent, 0.20f + 0.18f * mail_mix), mail_button.h * 0.5f, 1.0f, 0.90f);
+                            draw_icon(ui, 0xF0E0u,
+                                      Rect{mail_button.x + 24.0f * scale, mail_button.y + 13.0f * scale, 18.0f * scale, 18.0f * scale},
+                                      palette.text, 0.98f);
+                            draw_text_left(ui, "Email",
+                                           Rect{mail_button.x + 52.0f * scale, mail_button.y + 13.0f * scale, mail_button.w - 68.0f * scale, 18.0f * scale},
+                                           font_body(scale), palette.text, 0.98f);
 
-    const Rect info_area{
-        content.x,
-        hero.y + hero.h + 18.0f * scale,
-        content.w,
-        content.h - hero.h - 24.0f * scale,
-    };
-    const auto info_split = ui.split_h_ratio(info_area, 0.5f, 16.0f * scale);
+                            if (clicked(input, github_button)) {
+                                open_external_uri("https://github.com/sudoevolve");
+                            }
+                            if (clicked(input, mail_button)) {
+                                open_external_uri("mailto:sudoevolve@gmail.com");
+                            }
+                        });
+                });
 
-    draw_fill(ui, info_split.first, palette.surface_deep, 22.0f * scale, 0.96f);
-    draw_stroke(ui, info_split.first, palette.border_soft, 22.0f * scale, 1.0f, 0.88f);
-    draw_text_left(ui, "Project", Rect{info_split.first.x + 20.0f * scale, info_split.first.y + 18.0f * scale,
-                                       info_split.first.w - 40.0f * scale, 18.0f * scale},
-                   font_heading(scale), palette.text, 0.98f);
-    draw_text_left(ui, "Name: EUI", Rect{info_split.first.x + 20.0f * scale, info_split.first.y + 52.0f * scale,
-                                         info_split.first.w - 40.0f * scale, 16.0f * scale},
-                   font_body(scale), palette.text, 0.98f);
-    draw_text_left(ui, "Author: SudoEvolve", Rect{info_split.first.x + 20.0f * scale, info_split.first.y + 78.0f * scale,
-                                                  info_split.first.w - 40.0f * scale, 16.0f * scale},
-                   font_body(scale), palette.text, 0.98f);
-    draw_text_left(ui, "Renderer: Modern OpenGL", Rect{info_split.first.x + 20.0f * scale, info_split.first.y + 104.0f * scale,
-                                                       info_split.first.w - 40.0f * scale, 16.0f * scale},
-                   font_meta(scale), palette.muted, 0.98f);
-    draw_text_left(ui, "Repository: github.com/sudoevolve", Rect{info_split.first.x + 20.0f * scale, info_split.first.y + 130.0f * scale,
-                                                                 info_split.first.w - 40.0f * scale, 16.0f * scale},
-                   font_meta(scale), palette.muted, 0.98f);
+            ui.row(info_area)
+                .tracks({eui::quick::fr(), eui::quick::fr()})
+                .gap(16.0f * scale)
+                .begin([&](auto& info_cols) {
+                    const Rect project = info_cols.next();
+                    const Rect license = info_cols.next();
 
-    draw_fill(ui, info_split.second, palette.surface_deep, 22.0f * scale, 0.96f);
-    draw_stroke(ui, info_split.second, palette.border_soft, 22.0f * scale, 1.0f, 0.88f);
-    draw_text_left(ui, "License & Contact", Rect{info_split.second.x + 20.0f * scale, info_split.second.y + 18.0f * scale,
-                                                 info_split.second.w - 40.0f * scale, 18.0f * scale},
-                   font_heading(scale), palette.text, 0.98f);
-    draw_text_left(ui, "MIT License", Rect{info_split.second.x + 20.0f * scale, info_split.second.y + 52.0f * scale,
-                                           info_split.second.w - 40.0f * scale, 16.0f * scale},
-                   font_body(scale), palette.text, 0.98f);
-    draw_text_left(ui, "Copyright (c) 2026 SudoEvolve", Rect{info_split.second.x + 20.0f * scale, info_split.second.y + 78.0f * scale,
-                                                             info_split.second.w - 40.0f * scale, 16.0f * scale},
-                   font_meta(scale), palette.muted, 0.98f);
-    draw_text_left(ui, "Email: sudoevolve@gmail.com", Rect{info_split.second.x + 20.0f * scale, info_split.second.y + 104.0f * scale,
-                                                           info_split.second.w - 40.0f * scale, 16.0f * scale},
-                   font_body(scale), palette.text, 0.98f);
-    draw_text_left(ui, "GitHub button opens the profile directly in your browser.", Rect{info_split.second.x + 20.0f * scale,
-                                                                                           info_split.second.y + 132.0f * scale,
-                                                                                           info_split.second.w - 40.0f * scale,
-                                                                                           28.0f * scale},
-                   font_meta(scale), palette.muted, 0.96f);
+                    draw_fill(ui, project, palette.surface_deep, 22.0f * scale, 0.96f);
+                    draw_stroke(ui, project, palette.border_soft, 22.0f * scale, 1.0f, 0.88f);
+                    draw_text_left(ui, "Project", Rect{project.x + 20.0f * scale, project.y + 18.0f * scale,
+                                                       project.w - 40.0f * scale, 18.0f * scale},
+                                   font_heading(scale), palette.text, 0.98f);
+                    draw_text_left(ui, "Name: EUI", Rect{project.x + 20.0f * scale, project.y + 52.0f * scale,
+                                                         project.w - 40.0f * scale, 16.0f * scale},
+                                   font_body(scale), palette.text, 0.98f);
+                    draw_text_left(ui, "Author: SudoEvolve", Rect{project.x + 20.0f * scale, project.y + 78.0f * scale,
+                                                                  project.w - 40.0f * scale, 16.0f * scale},
+                                   font_body(scale), palette.text, 0.98f);
+                    draw_text_left(ui, "Renderer: Modern OpenGL", Rect{project.x + 20.0f * scale, project.y + 104.0f * scale,
+                                                                       project.w - 40.0f * scale, 16.0f * scale},
+                                   font_meta(scale), palette.muted, 0.98f);
+                    draw_text_left(ui, "Repository: github.com/sudoevolve", Rect{project.x + 20.0f * scale, project.y + 130.0f * scale,
+                                                                                 project.w - 40.0f * scale, 16.0f * scale},
+                                   font_meta(scale), palette.muted, 0.98f);
+
+                    draw_fill(ui, license, palette.surface_deep, 22.0f * scale, 0.96f);
+                    draw_stroke(ui, license, palette.border_soft, 22.0f * scale, 1.0f, 0.88f);
+                    draw_text_left(ui, "License & Contact", Rect{license.x + 20.0f * scale, license.y + 18.0f * scale,
+                                                                 license.w - 40.0f * scale, 18.0f * scale},
+                                   font_heading(scale), palette.text, 0.98f);
+                    draw_text_left(ui, "MIT License", Rect{license.x + 20.0f * scale, license.y + 52.0f * scale,
+                                                           license.w - 40.0f * scale, 16.0f * scale},
+                                   font_body(scale), palette.text, 0.98f);
+                    draw_text_left(ui, "Copyright (c) 2026 SudoEvolve", Rect{license.x + 20.0f * scale, license.y + 78.0f * scale,
+                                                                             license.w - 40.0f * scale, 16.0f * scale},
+                                   font_meta(scale), palette.muted, 0.98f);
+                    draw_text_left(ui, "Email: sudoevolve@gmail.com", Rect{license.x + 20.0f * scale, license.y + 104.0f * scale,
+                                                                           license.w - 40.0f * scale, 16.0f * scale},
+                                   font_body(scale), palette.text, 0.98f);
+                    draw_text_left(ui, "GitHub button opens the profile directly in your browser.", Rect{license.x + 20.0f * scale,
+                                                                                                           license.y + 132.0f * scale,
+                                                                                                           license.w - 40.0f * scale,
+                                                                                                           28.0f * scale},
+                                   font_meta(scale), palette.muted, 0.96f);
+                });
+        });
 }
 
 void draw_sidebar(UI& ui, const eui::InputState& input, GalleryState& state, const Rect& rect, float scale) {
@@ -1860,51 +2029,60 @@ void draw_sidebar(UI& ui, const eui::InputState& input, GalleryState& state, con
     draw_fill(ui, rect, palette.surface, 26.0f * scale, 1.0f);
     draw_stroke(ui, rect, palette.border, 26.0f * scale, 1.0f, 1.0f);
 
-    const Rect inner = inset_rect(rect, 18.0f * scale);
-    draw_text_left(ui, "EUI Gallery", Rect{inner.x, inner.y, inner.w, 22.0f * scale}, font_display(scale), palette.text, 1.0f);
-    draw_text_left(ui, "Controls, design, layout, motion, dashboard, settings and about.",
-                   Rect{inner.x, inner.y + 26.0f * scale, inner.w, 18.0f * scale}, font_meta(scale), palette.muted, 0.96f);
+    ui.view(rect)
+        .padding(18.0f * scale)
+        .column()
+        .tracks({eui::quick::px(54.0f * scale), eui::quick::fr()})
+        .gap(8.0f * scale)
+        .begin([&](auto& rows) {
+            const Rect header = rows.next();
+            const Rect list_rect = rows.next();
 
-    const float row_h = 42.0f * scale;
-    const float row_gap = 8.0f * scale;
-    const float list_y = inner.y + 62.0f * scale;
-    const float indicator_y_target = list_y + static_cast<float>(state.selected_page) * (row_h + row_gap);
-    const std::uint64_t indicator_id = ui.id("gallery/sidebar-indicator");
-    if (ui.motion_value(indicator_id, -1.0f) < 0.0f) {
-        ui.reset_motion(indicator_id, indicator_y_target);
-    }
-    const float indicator_y = ui.motion(indicator_id, indicator_y_target, 18.0f);
-    draw_fill(ui, Rect{inner.x, indicator_y, inner.w, row_h}, nav_selected_fill_hex(palette), 18.0f * scale, 0.96f);
-    draw_stroke(ui, Rect{inner.x, indicator_y, inner.w, row_h}, accent, 18.0f * scale, 1.0f, 0.72f);
-    draw_fill(ui, Rect{inner.x, indicator_y, 4.0f * scale, row_h}, accent, 2.0f * scale, 0.98f);
+            draw_text_left(ui, "EUI Gallery", Rect{header.x, header.y, header.w, 22.0f * scale}, font_display(scale), palette.text, 1.0f);
+            draw_text_left(ui, "Controls, design, layout, motion, dashboard, settings and about.",
+                           Rect{header.x, header.y + 26.0f * scale, header.w, 18.0f * scale}, font_meta(scale), palette.muted, 0.96f);
 
-    for (std::size_t i = 0; i < kPages.size(); ++i) {
-        const Rect row{
-            inner.x,
-            list_y + static_cast<float>(i) * (row_h + row_gap),
-            inner.w,
-            row_h,
-        };
-        const bool is_hovered = hovered(input, row);
-        const bool is_selected = state.selected_page == static_cast<int>(i);
-        const float hover_mix =
-            ui.presence(ui.id("gallery/sidebar-hover", static_cast<std::uint64_t>(i + 1u)), is_hovered, 18.0f, 12.0f);
+            const float row_h = 42.0f * scale;
+            const float row_gap = 8.0f * scale;
+            std::array<Rect, kPages.size()> page_rows{};
+            auto nav_rows = ui.column(list_rect).repeat(kPages.size(), eui::quick::px(row_h)).gap(row_gap).begin();
+            for (std::size_t i = 0; i < kPages.size(); ++i) {
+                page_rows[i] = nav_rows.next();
+            }
 
-        if (!is_selected && is_hovered) {
-            draw_fill(ui, row, palette.surface_deep, 18.0f * scale, 0.92f * hover_mix);
-            draw_stroke(ui, row, palette.border_soft, 18.0f * scale, 1.0f, 0.88f * hover_mix);
-        }
-        if (clicked(input, row)) {
-            state.selected_page = static_cast<int>(i);
-        }
+            const Rect selected_row = page_rows[static_cast<std::size_t>(std::clamp(state.selected_page, 0, static_cast<int>(kPages.size() - 1)))];
+            const std::uint64_t indicator_id = ui.id("gallery/sidebar-indicator");
+            if (ui.motion_value(indicator_id, -1.0f) < 0.0f) {
+                ui.reset_motion(indicator_id, selected_row.y);
+            }
+            const float indicator_y = ui.motion(indicator_id, selected_row.y, 18.0f);
+            draw_fill(ui, Rect{selected_row.x, indicator_y, selected_row.w, row_h}, nav_selected_fill_hex(palette), 18.0f * scale, 0.96f);
+            draw_stroke(ui, Rect{selected_row.x, indicator_y, selected_row.w, row_h}, accent, 18.0f * scale, 1.0f, 0.72f);
+            draw_fill(ui, Rect{selected_row.x, indicator_y, 4.0f * scale, row_h}, accent, 2.0f * scale, 0.98f);
 
-        draw_icon(ui, kPageIcons[i],
-                  Rect{row.x + 14.0f * scale, row.y + (row.h - 14.0f * scale) * 0.5f, 14.0f * scale, 14.0f * scale},
-                  is_selected ? accent : palette.muted, 0.98f);
-        draw_text_left(ui, kPages[i].title,
-                       Rect{row.x + 38.0f * scale, row.y + 12.0f * scale, row.w - 54.0f * scale, 16.0f * scale},
-                       font_body(scale), is_selected ? palette.text : mix_hex(palette.text, palette.muted, 0.22f), 0.98f);
-    }
+            for (std::size_t i = 0; i < kPages.size(); ++i) {
+                const Rect row = page_rows[i];
+                const bool is_hovered = hovered(input, row);
+                const bool is_selected = state.selected_page == static_cast<int>(i);
+                const float hover_mix =
+                    ui.presence(ui.id("gallery/sidebar-hover", static_cast<std::uint64_t>(i + 1u)), is_hovered, 18.0f, 12.0f);
+
+                if (!is_selected && is_hovered) {
+                    draw_fill(ui, row, palette.surface_deep, 18.0f * scale, 0.92f * hover_mix);
+                    draw_stroke(ui, row, palette.border_soft, 18.0f * scale, 1.0f, 0.88f * hover_mix);
+                }
+                if (clicked(input, row)) {
+                    state.selected_page = static_cast<int>(i);
+                }
+
+                draw_icon(ui, kPageIcons[i],
+                          Rect{row.x + 14.0f * scale, row.y + (row.h - 14.0f * scale) * 0.5f, 14.0f * scale, 14.0f * scale},
+                          is_selected ? accent : palette.muted, 0.98f);
+                draw_text_left(ui, kPages[i].title,
+                               Rect{row.x + 38.0f * scale, row.y + 12.0f * scale, row.w - 54.0f * scale, 16.0f * scale},
+                               font_body(scale), is_selected ? palette.text : mix_hex(palette.text, palette.muted, 0.22f), 0.98f);
+            }
+        });
 }
 
 void draw_stage(UI& ui, const eui::InputState& input, GalleryState& state, const Rect& rect, float scale, double time_seconds) {
@@ -1913,43 +2091,48 @@ void draw_stage(UI& ui, const eui::InputState& input, GalleryState& state, const
 
     draw_fill(ui, rect, palette.surface, 26.0f * scale, 1.0f);
     draw_stroke(ui, rect, palette.border, 26.0f * scale, 1.0f, 1.0f);
+    ui.view(rect)
+        .padding(22.0f * scale)
+        .column()
+        .tracks({eui::quick::px(24.0f * scale), eui::quick::px(18.0f * scale), eui::quick::px(30.0f * scale), eui::quick::fr()})
+        .gap(12.0f * scale)
+        .begin([&](auto& rows) {
+            const Rect title_rect = rows.next();
+            const Rect summary_rect = rows.next();
+            const Rect chip_rect = rows.next();
+            const Rect stage_rect = rows.next();
 
-    const Rect inner = inset_rect(rect, 22.0f * scale);
-    const Rect title_rect{inner.x, inner.y, inner.w, 24.0f * scale};
-    const Rect summary_rect{inner.x, inner.y + 26.0f * scale, inner.w, 18.0f * scale};
-    const Rect chip_rect{inner.x, inner.y + 56.0f * scale, 224.0f * scale, 30.0f * scale};
-    const Rect stage_rect{inner.x, inner.y + 102.0f * scale, inner.w, inner.h - 102.0f * scale};
+            draw_text_left(ui, page.title, title_rect, font_display(scale), palette.text, 1.0f);
+            draw_text_left(ui, page.summary, summary_rect, font_meta(scale), palette.muted, 0.96f);
+            draw_fill(ui, chip_rect, palette.surface_deep, chip_rect.h * 0.5f, 0.96f);
+            draw_stroke(ui, chip_rect, palette.border_soft, chip_rect.h * 0.5f, 1.0f, 0.90f);
+            draw_text_center(ui, page.api_label, chip_rect, font_meta(scale), mix_hex(palette.text, palette.accent, 0.40f), 0.98f);
 
-    draw_text_left(ui, page.title, title_rect, font_display(scale), palette.text, 1.0f);
-    draw_text_left(ui, page.summary, summary_rect, font_meta(scale), palette.muted, 0.96f);
-    draw_fill(ui, chip_rect, palette.surface_deep, chip_rect.h * 0.5f, 0.96f);
-    draw_stroke(ui, chip_rect, palette.border_soft, chip_rect.h * 0.5f, 1.0f, 0.90f);
-    draw_text_center(ui, page.api_label, chip_rect, font_meta(scale), mix_hex(palette.text, palette.accent, 0.40f), 0.98f);
-
-    switch (state.selected_page) {
-        case kPageBasicControls:
-            draw_basic_controls_page(ui, input, state, stage_rect, scale);
-            break;
-        case kPageDesign:
-            draw_design_page(ui, input, state, stage_rect, scale);
-            break;
-        case kPageLayout:
-            draw_layout_page(ui, state, stage_rect, scale);
-            break;
-        case kPageAnimation:
-            draw_animation_page(ui, input, state, stage_rect, scale, time_seconds);
-            break;
-        case kPageDashboard:
-            draw_dashboard_page(ui, state, stage_rect, scale);
-            break;
-        case kPageSettings:
-            draw_settings_page(ui, input, state, stage_rect, scale);
-            break;
-        case kPageAbout:
-        default:
-            draw_about_page(ui, input, state, stage_rect, scale);
-            break;
-    }
+            switch (state.selected_page) {
+                case kPageBasicControls:
+                    draw_basic_controls_page(ui, input, state, stage_rect, scale);
+                    break;
+                case kPageDesign:
+                    draw_design_page(ui, input, state, stage_rect, scale);
+                    break;
+                case kPageLayout:
+                    draw_layout_page(ui, state, stage_rect, scale);
+                    break;
+                case kPageAnimation:
+                    draw_animation_page(ui, input, state, stage_rect, scale, time_seconds);
+                    break;
+                case kPageDashboard:
+                    draw_dashboard_page(ui, state, stage_rect, scale);
+                    break;
+                case kPageSettings:
+                    draw_settings_page(ui, input, state, stage_rect, scale);
+                    break;
+                case kPageAbout:
+                default:
+                    draw_about_page(ui, input, state, stage_rect, scale);
+                    break;
+            }
+        });
 }
 
 }  // namespace
@@ -2000,19 +2183,32 @@ int main() {
                 .stroke(palette.border, 1.0f)
                 .shadow(0.0f, 14.0f * scale, 28.0f * scale, panel_shadow_hex(palette), palette.light ? 0.10f : 0.18f)
                 .begin([&](auto& root) {
-                    const Rect header = root.dock_top(68.0f * scale, 16.0f * scale);
-                    draw_fill(ui, header, palette.surface_alt, 22.0f * scale, 0.96f);
-                    draw_stroke(ui, header, palette.border, 22.0f * scale, 1.0f, 1.0f);
-                    draw_text_left(ui, "EUI Gallery",
-                                   Rect{header.x + 22.0f * scale, header.y + 14.0f * scale, header.w - 44.0f * scale, 20.0f * scale},
-                                   font_display(scale), palette.text, 1.0f);
-                    draw_text_left(ui, "Left side is now top-level navigation only. Animation detail lives inside the Animation page.",
-                                   Rect{header.x + 22.0f * scale, header.y + 36.0f * scale, header.w - 44.0f * scale, 16.0f * scale},
-                                   font_meta(scale), palette.muted, 0.96f);
+                    ui.view(root.content())
+                        .column()
+                        .tracks({eui::quick::px(68.0f * scale), eui::quick::fr()})
+                        .gap(16.0f * scale)
+                        .begin([&](auto& shell_rows) {
+                            const Rect header = shell_rows.next();
+                            const Rect body = shell_rows.next();
 
-                    const auto split = root.split_h_ratio(root.content(), 0.22f, 18.0f * scale);
-                    draw_sidebar(ui, input, state, split.first, scale);
-                    draw_stage(ui, input, state, split.second, scale, time_seconds);
+                            draw_fill(ui, header, palette.surface_alt, 22.0f * scale, 0.96f);
+                            draw_stroke(ui, header, palette.border, 22.0f * scale, 1.0f, 1.0f);
+                            draw_text_left(ui, "EUI Gallery",
+                                           Rect{header.x + 22.0f * scale, header.y + 14.0f * scale, header.w - 44.0f * scale, 20.0f * scale},
+                                           font_display(scale), palette.text, 1.0f);
+                            draw_text_left(ui, "Left side is now top-level navigation only. Animation detail lives inside the Animation page.",
+                                           Rect{header.x + 22.0f * scale, header.y + 36.0f * scale, header.w - 44.0f * scale, 16.0f * scale},
+                                           font_meta(scale), palette.muted, 0.96f);
+
+                            const float sidebar_w = std::min(320.0f * scale, body.w * 0.26f);
+                            ui.row(body)
+                                .tracks({eui::quick::px(sidebar_w), eui::quick::fr()})
+                                .gap(18.0f * scale)
+                                .begin([&](auto& shell_cols) {
+                                    draw_sidebar(ui, input, state, shell_cols.next(), scale);
+                                    draw_stage(ui, input, state, shell_cols.next(), scale, time_seconds);
+                                });
+                        });
                 });
 
             frame.request_next_frame();

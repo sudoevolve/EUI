@@ -4,8 +4,9 @@ This directory is intentionally small.
 
 Current recommended reading order:
 
-1. `modern-gl-roadmap.zh-CN.md`
-2. `project-structure.zh-CN.md`
+1. `quick-ui-tutorial.zh-CN.md`
+2. `modern-gl-roadmap.zh-CN.md`
+3. `project-structure.zh-CN.md`
 
 Current repo decisions:
 
