@@ -1,0 +1,62 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Linux (GCC / Clang)
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            sudo apt install -y clang
+          else
+            sudo apt install -y gcc g++
+          fi
+          sudo apt install -y cmake
+
+      - name: Configure
+        run: |
+          mkdir build
+          cd build
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            export CC=clang
+            export CXX=clang++
+          else
+            export CC=gcc
+            export CXX=g++
+          fi
+          cmake ..
+
+      - name: Build
+        run: |
+          cmake --build build -- -j$(nproc)
+
+  build-windows:
+    name: Windows (MSVC)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022"
+
+      - name: Build
+        run: |
+          cmake --build build --config Release
