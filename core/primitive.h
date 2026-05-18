@@ -554,6 +554,11 @@ private:
     }
 
     void drawShadow(int windowWidth, int windowHeight) const {
+        if (bounds_.width <= 0.0f || bounds_.height <= 0.0f ||
+            opacity_ <= 0.001f || shadow_.color.a <= 0.001f) {
+            return;
+        }
+
         Rect shadowShape = bounds_;
         shadowShape.x += shadow_.offset.x - shadow_.spread;
         shadowShape.y += shadow_.offset.y - shadow_.spread;
@@ -561,21 +566,11 @@ private:
         shadowShape.height += shadow_.spread * 2.0f;
 
         const float blur = std::max(shadow_.blur, 1.0f);
-
-        Rect ambientShape = shadowShape;
-        ambientShape.x += shadow_.offset.x * 0.15f;
-        ambientShape.y += shadow_.offset.y * 0.15f;
-        drawLayer(windowWidth, windowHeight, expandRect(ambientShape, blur * 1.4f), ambientShape,
-                  true, withAlpha(shadow_.color, 0.22f), blur * 1.4f);
-
-        Rect midShape = shadowShape;
-        midShape.x += shadow_.offset.x * 0.65f;
-        midShape.y += shadow_.offset.y * 0.65f;
-        drawLayer(windowWidth, windowHeight, expandRect(midShape, blur * 0.85f), midShape,
-                  true, withAlpha(shadow_.color, 0.34f), blur * 0.85f);
-
-        drawLayer(windowWidth, windowHeight, expandRect(shadowShape, blur * 0.38f), shadowShape,
-                  true, withAlpha(shadow_.color, 0.26f), blur * 0.38f);
+        const float offsetMagnitude = std::max(std::fabs(shadow_.offset.x), std::fabs(shadow_.offset.y));
+        const float shadowBlur = blur * 1.08f;
+        const float shadowExtent = shadowBlur * 1.18f + offsetMagnitude * 0.20f + 1.0f;
+        drawLayer(windowWidth, windowHeight, expandRect(shadowShape, shadowExtent), shadowShape,
+                  true, withAlpha(shadow_.color, 0.74f), shadowBlur);
     }
 
     void drawLayer(int windowWidth,

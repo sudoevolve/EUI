@@ -166,6 +166,15 @@ inline bool closeEnough(const Transform& left, const Transform& right, float eps
            closeEnough(left.origin, right.origin, epsilon);
 }
 
+inline bool closeEnoughSmoothTarget(float left, float right) {
+    return closeEnough(left, right, 0.012f);
+}
+
+template <typename T>
+inline bool closeEnoughSmoothTarget(const T& left, const T& right) {
+    return closeEnough(left, right);
+}
+
 inline float lerpValue(float from, float to, float amount) {
     return from + (to - from) * amount;
 }
@@ -312,14 +321,19 @@ public:
         }
 
         const T previous = current_;
+        if (closeEnoughSmoothTarget(current_, target)) {
+            current_ = target;
+            return !closeEnough(previous, current_);
+        }
+
         if (deltaSeconds <= 0.0f || speed <= 0.0f) {
             current_ = target;
         } else {
-            const float amount = 1.0f - std::exp(-speed * deltaSeconds);
+            const float amount = 1.0f - std::exp(-std::min(speed, 32.0f) * deltaSeconds);
             current_ = lerpValue(current_, target, amount);
         }
 
-        if (closeEnough(current_, target)) {
+        if (closeEnoughSmoothTarget(current_, target)) {
             current_ = target;
         }
 
@@ -331,7 +345,7 @@ public:
     }
 
     bool isMovingTo(const T& target) const {
-        return !closeEnough(current_, target);
+        return !closeEnoughSmoothTarget(current_, target);
     }
 
 private:

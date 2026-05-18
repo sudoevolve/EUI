@@ -442,14 +442,8 @@ private:
         return rect;
     }
 
-    static Rect scaleRectFromCenter(Rect rect, float scale) {
-        const float centerX = rect.x + rect.width * 0.5f;
-        const float centerY = rect.y + rect.height * 0.5f;
-        rect.width *= scale;
-        rect.height *= scale;
-        rect.x = centerX - rect.width * 0.5f;
-        rect.y = centerY - rect.height * 0.5f;
-        return rect;
+    static constexpr float dependentVisualPadding() {
+        return 4.0f;
     }
 
     static bool isIdentityTransform(const Transform& transform) {
@@ -471,6 +465,12 @@ private:
             origin.x + scaledX * cosine - scaledY * sine + transform.translate.x,
             origin.y + scaledX * sine + scaledY * cosine + transform.translate.y
         };
+    }
+
+    static float shadowVisualPadding(const Shadow& shadow) {
+        const float blur = std::max(shadow.blur, 1.0f);
+        const float offsetMagnitude = std::max(std::fabs(shadow.offset.x), std::fabs(shadow.offset.y));
+        return blur * 1.18f * 1.08f + offsetMagnitude * 0.20f + 1.0f;
     }
 
     static Rect transformRect(const Rect& rect, const LayoutRect& frame, const Transform& transform) {
@@ -498,7 +498,7 @@ private:
                 frame.width + shadow.spread * 2.0f,
                 frame.height + shadow.spread * 2.0f
             };
-            shadowRect = inflateRect(shadowRect, shadow.blur * 1.4f + 2.0f);
+            shadowRect = inflateRect(shadowRect, shadowVisualPadding(shadow));
             rect = unionRect(rect, shadowRect);
         }
         if (blur > 0.0f) {
@@ -1131,8 +1131,8 @@ private:
         const bool interactive = element.interactive && !element.disabled;
         const bool stateColorsVisible = element.hasStateColors &&
             (!closeEnough(element.color, element.hoverColor) || !closeEnough(element.color, element.pressedColor));
-        const float hoverSpeed = element.smoothStateColors ? 9.0f : 0.0f;
-        const float pressSpeed = element.smoothStateColors ? 16.0f : 0.0f;
+        const float hoverSpeed = element.smoothStateColors ? 12.0f : 0.0f;
+        const float pressSpeed = element.smoothStateColors ? 20.0f : 0.0f;
         const bool hoverChanged = instance.hoverBlend.update(interactive && stateColorsVisible && instance.interaction.hover ? 1.0f : 0.0f,
                                                              hoverSpeed,
                                                              deltaSeconds);
@@ -1184,8 +1184,8 @@ private:
         const bool interactive = element.interactive && !element.disabled;
         const bool stateColorsVisible = element.hasStateColors &&
             (!closeEnough(element.color, element.hoverColor) || !closeEnough(element.color, element.pressedColor));
-        const float hoverSpeed = element.smoothStateColors ? 9.0f : 0.0f;
-        const float pressSpeed = element.smoothStateColors ? 16.0f : 0.0f;
+        const float hoverSpeed = element.smoothStateColors ? 12.0f : 0.0f;
+        const float pressSpeed = element.smoothStateColors ? 20.0f : 0.0f;
         const bool hoverChanged = instance.hoverBlend.update(interactive && stateColorsVisible && instance.interaction.hover ? 1.0f : 0.0f,
                                                              hoverSpeed,
                                                              deltaSeconds);
@@ -1320,7 +1320,8 @@ private:
 
     DependentVisualState dependentVisualStateForElement(const Element& element) const {
         DependentVisualState state;
-        state.rect = inflateRect({element.frame.x, element.frame.y, element.frame.width, element.frame.height}, 56.0f);
+        state.rect = inflateRect({element.frame.x, element.frame.y, element.frame.width, element.frame.height},
+                                 dependentVisualPadding());
 
         if (!element.hoverOpacitySourceId.empty()) {
             float hover = 0.0f;
@@ -1336,12 +1337,8 @@ private:
             float press = 0.0f;
             LayoutRect sourceFrame;
             if (pressBlendForSource(element.visualStateSourceId, press, sourceFrame)) {
+                (void)sourceFrame;
                 state.scale = 1.0f - (1.0f - element.pressedScale) * press;
-                if (std::fabs(state.scale - 1.0f) > 0.0001f) {
-                    state.rect = inflateRect(scaleRectFromCenter(
-                        {element.frame.x, element.frame.y, element.frame.width, element.frame.height},
-                        state.scale), 56.0f);
-                }
             }
         }
 
