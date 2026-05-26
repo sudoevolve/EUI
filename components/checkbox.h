@@ -7,6 +7,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace components {
 
@@ -68,26 +69,38 @@ public:
         const float labelLineHeight = fontSize_;
         const float labelY = std::max(0.0f, (height_ - labelLineHeight) * 0.5f);
         const float markThickness = std::max(2.0f, box * 0.12f);
-        const float markAngle = 0.78f;
         const float markAngleCos = 0.7109f;
         const float markAngleSin = 0.7033f;
-        const float markShort = checked_ ? box * 0.28f : 0.0f;
-        const float markLong = checked_ ? box * 0.46f : 0.0f;
-        const float markOverlap = markThickness * 0.70f;
+        const float markShort = box * 0.28f;
+        const float markLong = box * 0.46f;
+        const float markHalf = markThickness * 0.5f;
         const float markStartX = box * 0.26f;
         const float markStartY = box * 0.55f;
-        const float markCornerX = markStartX + box * 0.28f * markAngleCos;
-        const float markCornerY = markStartY + box * 0.28f * markAngleSin;
-        const float markLongX = markCornerX - markOverlap * markAngleCos;
-        const float markLongY = markCornerY + markOverlap * markAngleSin;
-        core::Transition markShortTransition = checked_ ? transition_ : core::Transition::none();
-        markShortTransition.durationSeconds = 0.09f;
-        markShortTransition.delaySeconds = 0.0f;
-        markShortTransition.ease = core::Ease::OutCubic;
-        core::Transition markLongTransition = checked_ ? transition_ : core::Transition::none();
-        markLongTransition.durationSeconds = 0.12f;
-        markLongTransition.delaySeconds = 0.08f;
-        markLongTransition.ease = core::Ease::OutCubic;
+        const float markCornerX = markStartX + markShort * markAngleCos;
+        const float markCornerY = markStartY + markShort * markAngleSin;
+        const float markEndX = markCornerX + markLong * markAngleCos;
+        const float markEndY = markCornerY - markLong * markAngleSin;
+        const core::Vec2 shortNormal{-markAngleSin * markHalf, markAngleCos * markHalf};
+        const core::Vec2 longNormal{markAngleSin * markHalf, markAngleCos * markHalf};
+        const core::Vec2 outerCorner{markCornerX, markCornerY + markHalf / markAngleCos};
+        const core::Vec2 innerCorner{markCornerX, markCornerY - markHalf / markAngleCos};
+        const core::Vec2 markStart{markStartX, markStartY};
+        const core::Vec2 markEnd{markEndX, markEndY};
+        const std::vector<core::Vec2> markShortPoints{
+            {markStart.x + shortNormal.x, markStart.y + shortNormal.y},
+            outerCorner,
+            innerCorner,
+            {markStart.x - shortNormal.x, markStart.y - shortNormal.y}
+        };
+        const std::vector<core::Vec2> markLongPoints{
+            outerCorner,
+            {markEnd.x + longNormal.x, markEnd.y + longNormal.y},
+            {markEnd.x - longNormal.x, markEnd.y - longNormal.y},
+            innerCorner
+        };
+        core::Transition markTransition = transition_;
+        markTransition.durationSeconds = 0.12f;
+        markTransition.ease = core::Ease::OutCubic;
         const float hitWidth = text_.empty()
             ? box
             : std::min(width_, labelX + textWidth(text_, fontSize_));
@@ -127,30 +140,20 @@ public:
                     .size(box, box)
                     .clip()
                     .content([&] {
-                        ui_.rect(id_ + ".mark.short")
-                            .x(markStartX)
-                            .y(markStartY - markThickness * 0.5f)
-                            .size(markShort, markThickness)
+                        ui_.polygon(id_ + ".mark.short")
+                            .points(markShortPoints)
                             .color(style_.mark)
-                            .radius(markThickness * 0.5f)
                             .opacity(checked_ ? 1.0f : 0.0f)
-                            .rotate(markAngle)
-                            .transformOrigin(0.0f, 0.5f)
-                            .transition(markShortTransition)
-                            .animate(core::AnimProperty::Frame | core::AnimProperty::Opacity)
+                            .transition(markTransition)
+                            .animate(core::AnimProperty::Opacity)
                             .build();
 
-                        ui_.rect(id_ + ".mark.long")
-                            .x(markLongX)
-                            .y(markLongY - markThickness * 0.5f)
-                            .size(markLong + markOverlap, markThickness)
+                        ui_.polygon(id_ + ".mark.long")
+                            .points(markLongPoints)
                             .color(style_.mark)
-                            .radius(markThickness * 0.5f)
                             .opacity(checked_ ? 1.0f : 0.0f)
-                            .rotate(-markAngle)
-                            .transformOrigin(0.0f, 0.5f)
-                            .transition(markLongTransition)
-                            .animate(core::AnimProperty::Frame | core::AnimProperty::Opacity)
+                            .transition(markTransition)
+                            .animate(core::AnimProperty::Opacity)
                             .build();
                     })
                     .build();
