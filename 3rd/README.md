@@ -1,6 +1,6 @@
 # Vendored Third-Party Sources
 
-EUI-NEO builds with these local source snapshots by default, so a normal CMake configure does not need to download build-time dependencies.
+EUI-NEO prefers these local source snapshots by default, so a normal CMake configure does not download build-time dependencies while the `3rd/` sources are present.
 
 Bundled dependencies:
 
@@ -11,8 +11,8 @@ Bundled dependencies:
 
 CMake dependency modes:
 
-- `bundled` (default): only use sources under `3rd/`; fail if a bundled dependency is missing.
-- `auto`: use `3rd/` when present, and fetch only missing dependencies.
+- `auto` (default): use `3rd/` when present, and fetch only missing dependencies.
+- `bundled`: only use sources under `3rd/`; fail if a bundled dependency is missing.
 - `fetch`: fetch build-time dependencies from the pinned upstream URLs.
 
 Example online configure:
