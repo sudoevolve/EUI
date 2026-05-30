@@ -64,9 +64,22 @@ Linux package hint:
 sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libcurl4-openssl-dev
 ```
 
-The project creates one executable for each `app/*.cpp` page source, such as `gallery` and `demo`. After build, `assets/` is copied next to the executable automatically.
+Top-level builds create one executable for each `app/*.cpp` page source, such as `gallery` and `demo`. After build, `assets/` is copied next to the executable automatically.
 
 Tagged releases (`v*`) build Windows, Linux, and macOS packages through GitHub Actions and upload only runtime packages as release assets.
+
+## Use In Your Project
+
+EUI-NEO also exposes a CMake library target for external C++ projects:
+
+```cmake
+add_subdirectory(external/EUI-NEO)
+
+add_executable(my_app external/EUI-NEO/main.cpp app.cpp)
+eui_neo_configure_app(my_app)
+```
+
+For the easiest path, download EUI-NEO into `external/EUI-NEO`, add the snippet above, and implement `app::dslAppConfig()` plus `app::compose()` in `app.cpp`. EUI-NEO will own the GLFW window, event loop, OpenGL rendering, and asset copying. When EUI-NEO is added as a subdirectory, bundled examples are disabled by default. Set `-DEUI_BUILD_APPS=ON` to build `gallery`, `demo`, and the other sample apps. See [Integration Guide](docs/集成指南.md) for the beginner setup, `FetchContent`, and embedded GLFW loop examples.
 
 ## Project Layout
 
@@ -93,6 +106,7 @@ docs/         Implementation notes and API documentation
 - [Network](docs/网络.md)
 - [Platform Capabilities](docs/平台能力.md)
 - [Window And Pages](docs/窗口页面.md)
+- [Integration Guide](docs/集成指南.md)
 - [Development And Release](docs/开发与发布.md)
 - [Review Checklist](docs/Review清单.md)
 

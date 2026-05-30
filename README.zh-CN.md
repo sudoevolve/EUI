@@ -64,9 +64,22 @@ Linux 依赖提示：
 sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libcurl4-openssl-dev
 ```
 
-项目会为 `app/*.cpp` 下的每个页面源文件生成一个可执行程序，例如 `gallery` 和 `demo`。构建后会自动把 `assets/` 复制到可执行文件目录。
+顶层构建会为 `app/*.cpp` 下的每个页面源文件生成一个可执行程序，例如 `gallery` 和 `demo`。构建后会自动把 `assets/` 复制到可执行文件目录。
 
 推送 `v*` tag 后，GitHub Actions 会构建 Windows、Linux、macOS 包，并且 release assets 只上传运行包。
+
+## 接入到你的项目
+
+EUI-NEO 也提供给外部 C++ 项目使用的 CMake 库 target：
+
+```cmake
+add_subdirectory(external/EUI-NEO)
+
+add_executable(my_app external/EUI-NEO/main.cpp app.cpp)
+eui_neo_configure_app(my_app)
+```
+
+最简单的方式是把 EUI-NEO 下载到 `external/EUI-NEO`，加入上面的 CMake 片段，然后在 `app.cpp` 里实现 `app::dslAppConfig()` 和 `app::compose()`。EUI-NEO 会接管 GLFW 窗口、事件循环、OpenGL 渲染和资源复制。EUI-NEO 作为子目录接入时，默认不会构建仓库自带示例。需要构建 `gallery`、`demo` 等示例时，配置 `-DEUI_BUILD_APPS=ON`。小白接入、`FetchContent` 和嵌入已有 GLFW 主循环的写法见 [集成指南](docs/集成指南.md)。
 
 ## 目录结构
 
@@ -93,6 +106,7 @@ docs/         项目实现文档
 - [网络](docs/网络.md)
 - [平台能力](docs/平台能力.md)
 - [窗口页面](docs/窗口页面.md)
+- [集成指南](docs/集成指南.md)
 - [开发与发布](docs/开发与发布.md)
 - [Review 清单](docs/Review清单.md)
 
