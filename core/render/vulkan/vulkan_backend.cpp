@@ -113,6 +113,79 @@ VkShaderModule createShaderModule(VkDevice device, const std::uint32_t* code, st
     return module;
 }
 
+VkAccessFlags accessMaskForLayout(VkImageLayout layout) {
+    switch (layout) {
+        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+            return VK_ACCESS_TRANSFER_READ_BIT;
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            return VK_ACCESS_TRANSFER_WRITE_BIT;
+        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            return VK_ACCESS_SHADER_READ_BIT;
+        default:
+            return 0;
+    }
+}
+
+VkPipelineStageFlags sourceStageForLayout(VkImageLayout layout) {
+    switch (layout) {
+        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            return VK_PIPELINE_STAGE_TRANSFER_BIT;
+        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+            return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        default:
+            return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    }
+}
+
+VkPipelineStageFlags destinationStageForLayout(VkImageLayout layout) {
+    if (layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    }
+    return sourceStageForLayout(layout);
+}
+
+void transitionImageLayout(VkCommandBuffer commandBuffer,
+                           VkImage image,
+                           VkImageLayout oldLayout,
+                           VkImageLayout newLayout) {
+    if (image == VK_NULL_HANDLE || oldLayout == newLayout) {
+        return;
+    }
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = accessMaskForLayout(oldLayout);
+    barrier.dstAccessMask = accessMaskForLayout(newLayout);
+
+    vkCmdPipelineBarrier(commandBuffer,
+                         sourceStageForLayout(oldLayout),
+                         destinationStageForLayout(newLayout),
+                         0,
+                         0,
+                         nullptr,
+                         0,
+                         nullptr,
+                         1,
+                         &barrier);
+}
+
 VkRect2D clampScissor(const core::Rect& rect, int windowWidth, int windowHeight) {
     const float left = std::clamp(rect.x, 0.0f, static_cast<float>(std::max(0, windowWidth)));
     const float top = std::clamp(rect.y, 0.0f, static_cast<float>(std::max(0, windowHeight)));
@@ -203,6 +276,7 @@ void VulkanRenderBackend::beginFrame(const RenderSurface& surface) {
     frameActive_ = true;
     frameRecorded_ = false;
     renderPassActive_ = false;
+    backdropReady_ = false;
     primitiveVertexUsed_ = 0;
 }
 
@@ -217,9 +291,10 @@ void VulkanRenderBackend::present() {
         vkCmdEndRenderPass(commandBuffers_[currentImage_]);
         renderPassActive_ = false;
     }
+    transitionSwapchainImage(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     vkEndCommandBuffer(commandBuffers_[currentImage_]);
 
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.waitSemaphoreCount = 1;
@@ -253,6 +328,7 @@ void VulkanRenderBackend::present() {
         swapchainExtent_ = {};
     }
     frameActive_ = false;
+    backdropReady_ = false;
 }
 
 bool VulkanRenderBackend::ensureRenderCache(int, int) {
@@ -280,7 +356,50 @@ void VulkanRenderBackend::setScissor(bool enabled, const core::Rect& rect, int) 
     scissorRect_ = rect;
 }
 
-void VulkanRenderBackend::prepareBackdropBlur(const core::Rect&, float, int, int) {}
+void VulkanRenderBackend::prepareBackdropBlur(const core::Rect&, float blur, int windowWidth, int windowHeight) {
+    if (!frameActive_ || blur <= 0.0f || windowWidth <= 0 || windowHeight <= 0 ||
+        !swapchainTransferSrcSupported_ || swapchainExtent_.width == 0 || swapchainExtent_.height == 0) {
+        backdropReady_ = false;
+        return;
+    }
+
+    if (!ensureRoundedRectPipeline() || !ensureBackdropResources()) {
+        backdropReady_ = false;
+        return;
+    }
+    if (!frameRecorded_) {
+        recordClearPass(clearColor_);
+    }
+    if (renderPassActive_) {
+        vkCmdEndRenderPass(commandBuffers_[currentImage_]);
+        renderPassActive_ = false;
+    }
+
+    VkCommandBuffer commandBuffer = commandBuffers_[currentImage_];
+    transitionSwapchainImage(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    transitionImageLayout(commandBuffer, backdropImage_, backdropImageLayout_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    backdropImageLayout_ = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    VkImageCopy copyRegion{};
+    copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.srcSubresource.layerCount = 1;
+    copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.dstSubresource.layerCount = 1;
+    copyRegion.extent = {swapchainExtent_.width, swapchainExtent_.height, 1};
+    vkCmdCopyImage(commandBuffer,
+                   swapchainImages_[currentImage_],
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   backdropImage_,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1,
+                   &copyRegion);
+
+    transitionImageLayout(commandBuffer, backdropImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    backdropImageLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    transitionSwapchainImage(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    backdropReady_ = true;
+    beginLoadPass();
+}
 
 void VulkanRenderBackend::drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) {
     const float effectiveAlpha = command.gradient.enabled && !command.shadowPass
@@ -289,10 +408,13 @@ void VulkanRenderBackend::drawRoundedRect(const RoundedRectDrawCommand& command,
     if (!frameActive_ || windowWidth <= 0 || windowHeight <= 0 || command.opacity <= 0.001f || effectiveAlpha <= 0.001f) {
         return;
     }
+    if (!ensureRoundedRectPipeline() || !ensureBackdropResources()) {
+        return;
+    }
     if (!frameRecorded_) {
         recordClearPass(clearColor_);
     }
-    if (!renderPassActive_ || !ensureRoundedRectPipeline() || !ensurePrimitiveVertexBuffer(command.vertices.size())) {
+    if (!renderPassActive_ || !ensurePrimitiveVertexBuffer(command.vertices.size())) {
         return;
     }
 
@@ -335,9 +457,19 @@ void VulkanRenderBackend::drawRoundedRect(const RoundedRectDrawCommand& command,
     constants.flags[2] = command.gradient.enabled && !command.shadowPass ? 1.0f : 0.0f;
     constants.flags[3] = static_cast<float>(command.gradient.direction == core::GradientDirection::Horizontal ? 0 : 1);
     constants.flags2[0] = command.shadowPass ? 1.0f : 0.0f;
+    constants.flags2[1] = command.shadowPass ? 0.0f : command.backdropBlur;
+    constants.flags2[2] = (!command.shadowPass && command.backdropBlur > 0.0f && backdropReady_) ? 1.0f : 0.0f;
 
     const VkDeviceSize bufferOffset = static_cast<VkDeviceSize>(vertexOffset * sizeof(PrimitiveGeometryVertex));
     vkCmdBindPipeline(commandBuffers_[currentImage_], VK_PIPELINE_BIND_POINT_GRAPHICS, roundedRectPipeline_);
+    vkCmdBindDescriptorSets(commandBuffers_[currentImage_],
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            roundedRectPipelineLayout_,
+                            0,
+                            1,
+                            &roundedRectDescriptorSet_,
+                            0,
+                            nullptr);
     vkCmdBindVertexBuffers(commandBuffers_[currentImage_], 0, 1, &primitiveVertexBuffer_, &bufferOffset);
     vkCmdPushConstants(commandBuffers_[currentImage_],
                        roundedRectPipelineLayout_,
@@ -520,7 +652,11 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
     swapchainInfo.imageColorSpace = surfaceFormat.colorSpace;
     swapchainInfo.imageExtent = extent;
     swapchainInfo.imageArrayLayers = 1;
+    swapchainTransferSrcSupported_ = (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
     swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (swapchainTransferSrcSupported_) {
+        swapchainInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
     swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     swapchainInfo.preTransform = capabilities.currentTransform;
     swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -535,6 +671,7 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
     vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, nullptr);
     swapchainImages_.resize(imageCount);
     vkGetSwapchainImagesKHR(device_, swapchain_, &imageCount, swapchainImages_.data());
+    swapchainImageLayouts_.assign(swapchainImages_.size(), VK_IMAGE_LAYOUT_UNDEFINED);
 
     swapchainImageViews_.resize(swapchainImages_.size());
     for (std::size_t i = 0; i < swapchainImages_.size(); ++i) {
@@ -558,10 +695,10 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = swapchainFormat_;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     VkAttachmentReference colorAttachmentRef{};
     colorAttachmentRef.attachment = 0;
@@ -630,8 +767,35 @@ bool VulkanRenderBackend::recreateSwapchain(const RenderSurface& surface) {
 }
 
 void VulkanRenderBackend::recordClearPass(const core::Color& color) {
+    transitionSwapchainImage(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    initializeBackdropImageIfNeeded();
+
+    beginLoadPass();
+    if (!renderPassActive_) {
+        return;
+    }
+
     VkClearValue clearValue{};
     clearValue.color = {{color.r, color.g, color.b, color.a}};
+
+    VkClearAttachment clearAttachment{};
+    clearAttachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    clearAttachment.colorAttachment = 0;
+    clearAttachment.clearValue = clearValue;
+
+    VkClearRect clearRect{};
+    clearRect.rect.offset = {0, 0};
+    clearRect.rect.extent = swapchainExtent_;
+    clearRect.layerCount = 1;
+    vkCmdClearAttachments(commandBuffers_[currentImage_], 1, &clearAttachment, 1, &clearRect);
+}
+
+void VulkanRenderBackend::beginLoadPass() {
+    if (!frameActive_ || renderPassActive_ || renderPass_ == VK_NULL_HANDLE || framebuffers_.empty()) {
+        return;
+    }
+
+    transitionSwapchainImage(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -639,8 +803,6 @@ void VulkanRenderBackend::recordClearPass(const core::Color& color) {
     renderPassInfo.framebuffer = framebuffers_[currentImage_];
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = swapchainExtent_;
-    renderPassInfo.clearValueCount = 1;
-    renderPassInfo.pClearValues = &clearValue;
 
     vkCmdBeginRenderPass(commandBuffers_[currentImage_], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     renderPassActive_ = true;
@@ -655,6 +817,7 @@ void VulkanRenderBackend::destroySwapchain() {
     frameRecorded_ = false;
     renderPassActive_ = false;
     destroyRoundedRectPipeline();
+    destroyBackdropResources();
     if (inFlight_ != VK_NULL_HANDLE) {
         vkDestroyFence(device_, inFlight_, nullptr);
         inFlight_ = VK_NULL_HANDLE;
@@ -689,6 +852,9 @@ void VulkanRenderBackend::destroySwapchain() {
     }
     commandBuffers_.clear();
     swapchainImages_.clear();
+    swapchainImageLayouts_.clear();
+    swapchainTransferSrcSupported_ = false;
+    backdropReady_ = false;
 }
 
 void VulkanRenderBackend::destroy() {
@@ -718,6 +884,22 @@ bool VulkanRenderBackend::ensureRoundedRectPipeline() {
     }
     if (device_ == VK_NULL_HANDLE || renderPass_ == VK_NULL_HANDLE) {
         return false;
+    }
+
+    if (roundedRectDescriptorSetLayout_ == VK_NULL_HANDLE) {
+        VkDescriptorSetLayoutBinding backdropBinding{};
+        backdropBinding.binding = 0;
+        backdropBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        backdropBinding.descriptorCount = 1;
+        backdropBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
+        descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorLayoutInfo.bindingCount = 1;
+        descriptorLayoutInfo.pBindings = &backdropBinding;
+        if (vkCreateDescriptorSetLayout(device_, &descriptorLayoutInfo, nullptr, &roundedRectDescriptorSetLayout_) != VK_SUCCESS) {
+            return false;
+        }
     }
 
     VkShaderModule vertexShader = createShaderModule(device_,
@@ -819,6 +1001,8 @@ bool VulkanRenderBackend::ensureRoundedRectPipeline() {
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &roundedRectDescriptorSetLayout_;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
     if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &roundedRectPipelineLayout_) != VK_SUCCESS) {
@@ -849,6 +1033,155 @@ bool VulkanRenderBackend::ensureRoundedRectPipeline() {
         destroyRoundedRectPipeline();
     }
     return created;
+}
+
+bool VulkanRenderBackend::ensureBackdropResources() {
+    if (device_ == VK_NULL_HANDLE || swapchainExtent_.width == 0 || swapchainExtent_.height == 0 ||
+        swapchainFormat_ == VK_FORMAT_UNDEFINED || roundedRectDescriptorSetLayout_ == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    const VkExtent2D targetExtent{swapchainExtent_.width, swapchainExtent_.height};
+    if (backdropImage_ != VK_NULL_HANDLE &&
+        backdropImageView_ != VK_NULL_HANDLE &&
+        backdropSampler_ != VK_NULL_HANDLE &&
+        backdropExtent_.width == targetExtent.width &&
+        backdropExtent_.height == targetExtent.height) {
+        return ensureBackdropDescriptor();
+    }
+
+    destroyBackdropResources();
+
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent = {targetExtent.width, targetExtent.height, 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = swapchainFormat_;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateImage(device_, &imageInfo, nullptr, &backdropImage_) != VK_SUCCESS) {
+        destroyBackdropResources();
+        return false;
+    }
+
+    VkMemoryRequirements memoryRequirements{};
+    vkGetImageMemoryRequirements(device_, backdropImage_, &memoryRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memoryRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (allocInfo.memoryTypeIndex == std::numeric_limits<std::uint32_t>::max() ||
+        vkAllocateMemory(device_, &allocInfo, nullptr, &backdropImageMemory_) != VK_SUCCESS ||
+        vkBindImageMemory(device_, backdropImage_, backdropImageMemory_, 0) != VK_SUCCESS) {
+        destroyBackdropResources();
+        return false;
+    }
+
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = backdropImage_;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = swapchainFormat_;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(device_, &viewInfo, nullptr, &backdropImageView_) != VK_SUCCESS) {
+        destroyBackdropResources();
+        return false;
+    }
+
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.maxLod = 1.0f;
+    if (vkCreateSampler(device_, &samplerInfo, nullptr, &backdropSampler_) != VK_SUCCESS) {
+        destroyBackdropResources();
+        return false;
+    }
+
+    backdropExtent_ = targetExtent;
+    backdropImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    return ensureBackdropDescriptor();
+}
+
+bool VulkanRenderBackend::ensureBackdropDescriptor() {
+    if (device_ == VK_NULL_HANDLE || roundedRectDescriptorSetLayout_ == VK_NULL_HANDLE ||
+        backdropImageView_ == VK_NULL_HANDLE || backdropSampler_ == VK_NULL_HANDLE) {
+        return false;
+    }
+    if (roundedRectDescriptorSet_ != VK_NULL_HANDLE) {
+        return true;
+    }
+
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSize.descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    if (vkCreateDescriptorPool(device_, &poolInfo, nullptr, &roundedRectDescriptorPool_) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = roundedRectDescriptorPool_;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &roundedRectDescriptorSetLayout_;
+    if (vkAllocateDescriptorSets(device_, &allocInfo, &roundedRectDescriptorSet_) != VK_SUCCESS) {
+        destroyBackdropDescriptorPool();
+        return false;
+    }
+
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.sampler = backdropSampler_;
+    imageInfo.imageView = backdropImageView_;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet descriptorWrite{};
+    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrite.dstSet = roundedRectDescriptorSet_;
+    descriptorWrite.dstBinding = 0;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptorWrite.pImageInfo = &imageInfo;
+    vkUpdateDescriptorSets(device_, 1, &descriptorWrite, 0, nullptr);
+    return true;
+}
+
+void VulkanRenderBackend::initializeBackdropImageIfNeeded() {
+    if (backdropImage_ == VK_NULL_HANDLE || backdropImageLayout_ != VK_IMAGE_LAYOUT_UNDEFINED ||
+        commandBuffers_.empty() || currentImage_ >= commandBuffers_.size()) {
+        return;
+    }
+
+    VkCommandBuffer commandBuffer = commandBuffers_[currentImage_];
+    transitionImageLayout(commandBuffer, backdropImage_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    backdropImageLayout_ = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+    VkClearColorValue clearColor{};
+    VkImageSubresourceRange range{};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.levelCount = 1;
+    range.layerCount = 1;
+    vkCmdClearColorImage(commandBuffer, backdropImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &range);
+
+    transitionImageLayout(commandBuffer, backdropImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    backdropImageLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 }
 
 bool VulkanRenderBackend::ensurePrimitiveVertexBuffer(std::size_t vertexCount) {
@@ -895,6 +1228,52 @@ void VulkanRenderBackend::destroyRoundedRectPipeline() {
         vkDestroyPipelineLayout(device_, roundedRectPipelineLayout_, nullptr);
         roundedRectPipelineLayout_ = VK_NULL_HANDLE;
     }
+    destroyBackdropDescriptorPool();
+    if (roundedRectDescriptorSetLayout_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device_, roundedRectDescriptorSetLayout_, nullptr);
+        roundedRectDescriptorSetLayout_ = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanRenderBackend::destroyBackdropResources() {
+    destroyBackdropDescriptorPool();
+    if (device_ == VK_NULL_HANDLE) {
+        backdropImage_ = VK_NULL_HANDLE;
+        backdropImageMemory_ = VK_NULL_HANDLE;
+        backdropImageView_ = VK_NULL_HANDLE;
+        backdropSampler_ = VK_NULL_HANDLE;
+        backdropImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+        backdropExtent_ = {};
+        backdropReady_ = false;
+        return;
+    }
+    if (backdropSampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(device_, backdropSampler_, nullptr);
+        backdropSampler_ = VK_NULL_HANDLE;
+    }
+    if (backdropImageView_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, backdropImageView_, nullptr);
+        backdropImageView_ = VK_NULL_HANDLE;
+    }
+    if (backdropImage_ != VK_NULL_HANDLE) {
+        vkDestroyImage(device_, backdropImage_, nullptr);
+        backdropImage_ = VK_NULL_HANDLE;
+    }
+    if (backdropImageMemory_ != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, backdropImageMemory_, nullptr);
+        backdropImageMemory_ = VK_NULL_HANDLE;
+    }
+    backdropImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    backdropExtent_ = {};
+    backdropReady_ = false;
+}
+
+void VulkanRenderBackend::destroyBackdropDescriptorPool() {
+    if (device_ != VK_NULL_HANDLE && roundedRectDescriptorPool_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device_, roundedRectDescriptorPool_, nullptr);
+    }
+    roundedRectDescriptorPool_ = VK_NULL_HANDLE;
+    roundedRectDescriptorSet_ = VK_NULL_HANDLE;
 }
 
 void VulkanRenderBackend::destroyPrimitiveVertexBuffer() {
@@ -920,6 +1299,16 @@ void VulkanRenderBackend::destroyPrimitiveVertexBuffer() {
     }
     primitiveVertexCapacity_ = 0;
     primitiveVertexUsed_ = 0;
+}
+
+void VulkanRenderBackend::transitionSwapchainImage(VkImageLayout newLayout) {
+    if (commandBuffers_.empty() || swapchainImages_.empty() || swapchainImageLayouts_.empty() ||
+        currentImage_ >= swapchainImages_.size()) {
+        return;
+    }
+    const VkImageLayout oldLayout = swapchainImageLayouts_[currentImage_];
+    transitionImageLayout(commandBuffers_[currentImage_], swapchainImages_[currentImage_], oldLayout, newLayout);
+    swapchainImageLayouts_[currentImage_] = newLayout;
 }
 
 std::uint32_t VulkanRenderBackend::findMemoryType(std::uint32_t filter, VkMemoryPropertyFlags properties) const {

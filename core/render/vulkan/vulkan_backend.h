@@ -44,10 +44,17 @@ private:
     void destroySwapchain();
     void destroy();
     void recordClearPass(const core::Color& color);
+    void beginLoadPass();
     bool ensureRoundedRectPipeline();
+    bool ensureBackdropResources();
+    bool ensureBackdropDescriptor();
+    void initializeBackdropImageIfNeeded();
     bool ensurePrimitiveVertexBuffer(std::size_t vertexCount);
     void destroyRoundedRectPipeline();
+    void destroyBackdropResources();
+    void destroyBackdropDescriptorPool();
     void destroyPrimitiveVertexBuffer();
+    void transitionSwapchainImage(VkImageLayout newLayout);
     std::uint32_t findMemoryType(std::uint32_t filter, VkMemoryPropertyFlags properties) const;
 
     core::window::Handle window_ = nullptr;
@@ -66,6 +73,7 @@ private:
     VkExtent2D swapchainExtent_{};
     std::vector<VkImage> swapchainImages_;
     std::vector<VkImageView> swapchainImageViews_;
+    std::vector<VkImageLayout> swapchainImageLayouts_;
     VkRenderPass renderPass_ = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> framebuffers_;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
@@ -78,11 +86,22 @@ private:
     bool frameRecorded_ = false;
     bool renderPassActive_ = false;
     bool scissorEnabled_ = false;
+    bool swapchainTransferSrcSupported_ = false;
+    bool backdropReady_ = false;
     core::Rect scissorRect_{};
     core::Color clearColor_{0.0f, 0.0f, 0.0f, 1.0f};
 
+    VkDescriptorSetLayout roundedRectDescriptorSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorPool roundedRectDescriptorPool_ = VK_NULL_HANDLE;
+    VkDescriptorSet roundedRectDescriptorSet_ = VK_NULL_HANDLE;
     VkPipelineLayout roundedRectPipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline roundedRectPipeline_ = VK_NULL_HANDLE;
+    VkImage backdropImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory backdropImageMemory_ = VK_NULL_HANDLE;
+    VkImageView backdropImageView_ = VK_NULL_HANDLE;
+    VkSampler backdropSampler_ = VK_NULL_HANDLE;
+    VkImageLayout backdropImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkExtent2D backdropExtent_{};
     VkBuffer primitiveVertexBuffer_ = VK_NULL_HANDLE;
     VkDeviceMemory primitiveVertexMemory_ = VK_NULL_HANDLE;
     void* primitiveVertexMapped_ = nullptr;
