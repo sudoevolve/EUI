@@ -89,6 +89,24 @@ double galleryFrameRateLimit() {
     return optionUnlockFps ? 0.0 : 90.0;
 }
 
+const char* windowBackendName() {
+#if defined(EUI_WINDOW_BACKEND_SDL2)
+    return "SDL2";
+#else
+    return "GLFW";
+#endif
+}
+
+const char* renderBackendName() {
+#if defined(EUI_RENDER_BACKEND_VULKAN)
+    return "Vulkan";
+#elif defined(EUI_RENDER_BACKEND_OPENGL)
+    return "OpenGL";
+#else
+    return "Unknown";
+#endif
+}
+
 components::theme::ThemeColorTokens themeColors() {
     components::theme::ThemeColorTokens tokens = optionNight ? components::theme::DarkThemeColors() : components::theme::LightThemeColors();
     tokens.primary = sampleColor;
@@ -1685,6 +1703,7 @@ void composeAboutPage(eui::Ui& ui, float width, float height) {
         : 162.0f;
     const float buttonRowWidth = buttonWidth * 2.0f + buttonGap;
     const float heroHeight = compact ? 342.0f : 238.0f;
+    const float runtimeHeight = compact ? 118.0f : 86.0f;
     const float licenseHeight = 92.0f;
 
     ui.column("about.body")
@@ -1789,6 +1808,56 @@ void composeAboutPage(eui::Ui& ui, float width, float height) {
                                 })
                                 .build();
                         });
+                })
+                .build();
+
+            ui.stack("about.runtime")
+                .size(contentWidth, runtimeHeight)
+                .content([&] {
+                    ui.rect("about.runtime.bg")
+                        .size(contentWidth, runtimeHeight)
+                        .color(surface())
+                        .radius(18.0f)
+                        .border(1.0f, borderColor())
+                        .build();
+
+                    ui.text("about.runtime.title")
+                        .x(22.0f)
+                        .y(13.0f)
+                        .size(std::max(0.0f, contentWidth - 44.0f), 24.0f)
+                        .text("Runtime")
+                        .fontSize(21.0f)
+                        .lineHeight(24.0f)
+                        .color(textPrimary())
+                        .build();
+
+                    const float itemGap = compact ? 8.0f : 14.0f;
+                    const float itemWidth = compact
+                        ? std::max(0.0f, contentWidth - 44.0f)
+                        : std::max(0.0f, (contentWidth - 44.0f - itemGap) * 0.5f);
+                    const float itemY = compact ? 46.0f : 44.0f;
+                    const float secondX = compact ? 22.0f : 22.0f + itemWidth + itemGap;
+                    const float secondY = compact ? itemY + 32.0f : itemY;
+
+                    ui.text("about.runtime.window")
+                        .x(22.0f)
+                        .y(itemY)
+                        .size(itemWidth, 24.0f)
+                        .text(std::string("Window: ") + windowBackendName())
+                        .fontSize(17.0f)
+                        .lineHeight(22.0f)
+                        .color(textMuted())
+                        .build();
+
+                    ui.text("about.runtime.render")
+                        .x(secondX)
+                        .y(secondY)
+                        .size(itemWidth, 24.0f)
+                        .text(std::string("Render: ") + renderBackendName())
+                        .fontSize(17.0f)
+                        .lineHeight(22.0f)
+                        .color(textMuted())
+                        .build();
                 })
                 .build();
 
