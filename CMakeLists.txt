@@ -21,7 +21,6 @@ endif()
 
 set(EUI_VULKAN_BACKEND_SOURCES
     core/render/vulkan/vulkan_backend.cpp
-    core/render/vulkan/vulkan_primitives.cpp
     core/render/vulkan/vulkan_text.cpp
     core/render/vulkan/vulkan_image.cpp
 )
@@ -76,6 +75,7 @@ set(CORE_SOURCES
     core/platform/native_bridge.c
     core/platform/platform.cpp
     core/render/image_facade.cpp
+    core/render/primitive.cpp
     core/render/render_backend.cpp
     core/render/stb_image_impl.cpp
     core/platform/tray_bridge.c

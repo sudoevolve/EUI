@@ -27,8 +27,12 @@ public:
     void blitRenderCache(int width, int height) override;
     void clear(const core::Color& color) override;
     void setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) override;
+    void prepareBackdropBlur(const core::Rect& bounds, float blur, int windowWidth, int windowHeight) override;
+    void drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) override;
 
 private:
+    void releasePrimitiveResources();
+
     core::window::Handle window_ = nullptr;
     RenderBackend* shareContext_ = nullptr;
     void* context_ = nullptr;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/render/primitive_geometry.h"
 #include "core/render/render_surface.h"
 #include "core/window/window_types.h"
 
@@ -29,6 +30,8 @@ public:
     virtual void blitRenderCache(int width, int height) = 0;
     virtual void clear(const core::Color& color) = 0;
     virtual void setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) = 0;
+    virtual void prepareBackdropBlur(const core::Rect& bounds, float blur, int windowWidth, int windowHeight) = 0;
+    virtual void drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) = 0;
 };
 
 std::unique_ptr<RenderBackend> createRenderBackend(core::window::Handle window, RenderBackend* shareBackend = nullptr);

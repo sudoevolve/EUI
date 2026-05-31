@@ -53,6 +53,7 @@ OpenGLRenderBackend::~OpenGLRenderBackend() {
     }
     makeCurrent();
     releaseRenderCache();
+    releasePrimitiveResources();
 #if defined(EUI_WINDOW_BACKEND_SDL2)
     if (context_ != nullptr) {
         SDL_GL_DeleteContext(context_);

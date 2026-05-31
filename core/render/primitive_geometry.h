@@ -14,6 +14,19 @@ struct PrimitiveGeometryVertex {
     Vec2 local;
 };
 
+struct RoundedRectDrawCommand {
+    std::vector<PrimitiveGeometryVertex> vertices;
+    Color fillColor{};
+    Gradient gradient{};
+    Border border{};
+    Rect rect{};
+    float radius = 0.0f;
+    float opacity = 1.0f;
+    float shadowBlur = 1.0f;
+    float backdropBlur = 0.0f;
+    bool shadowPass = false;
+};
+
 inline Vec3 transformPrimitivePoint(const Rect& bounds,
                                     const Transform& transform,
                                     const TransformMatrix& matrix,

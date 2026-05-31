@@ -1,7 +1,7 @@
 #include "core/render/primitive.h"
+
 #include "core/render/primitive_geometry.h"
 #include "core/render/render_backend.h"
-#include "core/render/vulkan/vulkan_backend.h"
 
 #include <algorithm>
 
@@ -9,8 +9,8 @@ namespace core {
 
 namespace {
 
-core::render::vulkan::VulkanRenderBackend* activeVulkanBackend() {
-    return static_cast<core::render::vulkan::VulkanRenderBackend*>(core::render::activeRenderBackend());
+core::render::RenderBackend* activeBackend() {
+    return core::render::activeRenderBackend();
 }
 
 } // namespace
@@ -38,7 +38,7 @@ struct RoundedRectPrimitive::Impl {
                    bool shadowPass,
                    const Color& layerColor,
                    float layerBlur) const {
-        auto* backend = activeVulkanBackend();
+        auto* backend = activeBackend();
         if (backend == nullptr) {
             return;
         }
@@ -46,21 +46,19 @@ struct RoundedRectPrimitive::Impl {
         const auto vertices = core::render::roundedRectGeometryVertices(
             bounds, transform, transformMatrix, hasTransformMatrix, geometryBounds);
 
-        core::render::vulkan::RoundedRectDrawData data{};
-        data.vertices.reserve(vertices.size());
-        for (const core::render::PrimitiveGeometryVertex& vertex : vertices) {
-            data.vertices.push_back({vertex.screen.x, vertex.screen.y, vertex.screen.z, vertex.local.x, vertex.local.y});
-        }
-        data.fillColor = shadowPass ? layerColor : color;
-        data.gradient = gradient;
-        data.border = shadowPass ? Border{} : border;
-        data.rect = sdfBounds;
-        data.radius = core::render::clampedPrimitiveRadius(cornerRadius, sdfBounds);
-        data.border.width = core::render::clampedPrimitiveBorderWidth(data.border.width, sdfBounds);
-        data.opacity = opacity;
-        data.shadowBlur = layerBlur;
-        data.shadowPass = shadowPass;
-        backend->drawRoundedRect(data, windowWidth, windowHeight);
+        core::render::RoundedRectDrawCommand command{};
+        command.vertices.assign(vertices.begin(), vertices.end());
+        command.fillColor = shadowPass ? layerColor : color;
+        command.gradient = gradient;
+        command.border = shadowPass ? Border{} : border;
+        command.rect = sdfBounds;
+        command.radius = core::render::clampedPrimitiveRadius(cornerRadius, sdfBounds);
+        command.border.width = core::render::clampedPrimitiveBorderWidth(command.border.width, sdfBounds);
+        command.opacity = opacity;
+        command.shadowBlur = layerBlur;
+        command.backdropBlur = shadowPass ? 0.0f : blur;
+        command.shadowPass = shadowPass;
+        backend->drawRoundedRect(command, windowWidth, windowHeight);
     }
 
     void drawShadow(int windowWidth, int windowHeight) const {
@@ -134,6 +132,13 @@ void RoundedRectPrimitive::render(int windowWidth, int windowHeight) const {
     if (impl_->bounds.width <= 0.0f || impl_->bounds.height <= 0.0f || impl_->opacity <= 0.001f) {
         return;
     }
+    auto* backend = activeBackend();
+    if (backend == nullptr) {
+        return;
+    }
+    if (impl_->blur > 0.0f) {
+        backend->prepareBackdropBlur(impl_->bounds, impl_->blur, windowWidth, windowHeight);
+    }
     if (impl_->shadow.enabled) {
         impl_->drawShadow(windowWidth, windowHeight);
     }
@@ -175,34 +180,28 @@ void PolygonPrimitive::render(int windowWidth, int windowHeight) const {
     if (impl_->points.size() < 3 || impl_->opacity <= 0.001f || impl_->color.a <= 0.001f) {
         return;
     }
-    auto* backend = activeVulkanBackend();
+    auto* backend = activeBackend();
     if (backend == nullptr) {
         return;
     }
 
-    core::render::vulkan::RoundedRectDrawData data{};
-    std::vector<core::render::PrimitiveGeometryVertex> vertices;
-    vertices.reserve((impl_->points.size() - 2u) * 3u);
-    core::render::appendPolygonTriangleFan(vertices,
+    core::render::RoundedRectDrawCommand command{};
+    command.vertices.reserve((impl_->points.size() - 2u) * 3u);
+    core::render::appendPolygonTriangleFan(command.vertices,
                                            impl_->bounds,
                                            impl_->transform,
                                            impl_->transformMatrix,
                                            impl_->hasTransformMatrix,
                                            impl_->points);
-    data.vertices.reserve(vertices.size());
-    for (const core::render::PrimitiveGeometryVertex& vertex : vertices) {
-        data.vertices.push_back({vertex.screen.x, vertex.screen.y, vertex.screen.z, vertex.local.x, vertex.local.y});
-    }
-
-    data.fillColor = impl_->color;
-    data.border = {};
-    data.gradient = {};
-    data.rect = impl_->bounds;
-    data.radius = 0.0f;
-    data.opacity = impl_->opacity;
-    data.shadowBlur = 1.0f;
-    data.shadowPass = false;
-    backend->drawRoundedRect(data, windowWidth, windowHeight);
+    command.fillColor = impl_->color;
+    command.border = {};
+    command.gradient = {};
+    command.rect = impl_->bounds;
+    command.radius = 0.0f;
+    command.opacity = impl_->opacity;
+    command.shadowBlur = 1.0f;
+    command.shadowPass = false;
+    backend->drawRoundedRect(command, windowWidth, windowHeight);
 }
 
 } // namespace core

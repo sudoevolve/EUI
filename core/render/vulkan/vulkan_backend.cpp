@@ -280,24 +280,26 @@ void VulkanRenderBackend::setScissor(bool enabled, const core::Rect& rect, int) 
     scissorRect_ = rect;
 }
 
-void VulkanRenderBackend::drawRoundedRect(const RoundedRectDrawData& data, int windowWidth, int windowHeight) {
-    const float effectiveAlpha = data.gradient.enabled && !data.shadowPass
-        ? std::max(data.gradient.start.a, data.gradient.end.a)
-        : data.fillColor.a;
-    if (!frameActive_ || windowWidth <= 0 || windowHeight <= 0 || data.opacity <= 0.001f || effectiveAlpha <= 0.001f) {
+void VulkanRenderBackend::prepareBackdropBlur(const core::Rect&, float, int, int) {}
+
+void VulkanRenderBackend::drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) {
+    const float effectiveAlpha = command.gradient.enabled && !command.shadowPass
+        ? std::max(command.gradient.start.a, command.gradient.end.a)
+        : command.fillColor.a;
+    if (!frameActive_ || windowWidth <= 0 || windowHeight <= 0 || command.opacity <= 0.001f || effectiveAlpha <= 0.001f) {
         return;
     }
     if (!frameRecorded_) {
         recordClearPass(clearColor_);
     }
-    if (!renderPassActive_ || !ensureRoundedRectPipeline() || !ensurePrimitiveVertexBuffer(data.vertices.size())) {
+    if (!renderPassActive_ || !ensureRoundedRectPipeline() || !ensurePrimitiveVertexBuffer(command.vertices.size())) {
         return;
     }
 
     const std::size_t vertexOffset = primitiveVertexUsed_;
-    auto* mappedVertices = static_cast<RoundedRectVertex*>(primitiveVertexMapped_);
-    std::copy(data.vertices.begin(), data.vertices.end(), mappedVertices + vertexOffset);
-    primitiveVertexUsed_ += data.vertices.size();
+    auto* mappedVertices = static_cast<PrimitiveGeometryVertex*>(primitiveVertexMapped_);
+    std::copy(command.vertices.begin(), command.vertices.end(), mappedVertices + vertexOffset);
+    primitiveVertexUsed_ += command.vertices.size();
 
     VkViewport viewport{};
     viewport.x = 0.0f;
@@ -318,23 +320,23 @@ void VulkanRenderBackend::drawRoundedRect(const RoundedRectDrawData& data, int w
     RoundedRectPushConstants constants{};
     constants.windowAndShape[0] = static_cast<float>(windowWidth);
     constants.windowAndShape[1] = static_cast<float>(windowHeight);
-    constants.windowAndShape[2] = data.radius;
-    constants.windowAndShape[3] = data.shadowPass ? 0.0f : data.border.width;
-    writeColor(constants.fillColor, data.fillColor);
-    writeColor(constants.gradientStart, data.gradient.start);
-    writeColor(constants.gradientEnd, data.gradient.end);
-    writeColor(constants.borderColor, data.border.color);
-    constants.rect[0] = data.rect.x;
-    constants.rect[1] = data.rect.y;
-    constants.rect[2] = data.rect.width;
-    constants.rect[3] = data.rect.height;
-    constants.flags[0] = data.opacity;
-    constants.flags[1] = data.shadowBlur;
-    constants.flags[2] = data.gradient.enabled && !data.shadowPass ? 1.0f : 0.0f;
-    constants.flags[3] = static_cast<float>(data.gradient.direction == core::GradientDirection::Horizontal ? 0 : 1);
-    constants.flags2[0] = data.shadowPass ? 1.0f : 0.0f;
+    constants.windowAndShape[2] = command.radius;
+    constants.windowAndShape[3] = command.shadowPass ? 0.0f : command.border.width;
+    writeColor(constants.fillColor, command.fillColor);
+    writeColor(constants.gradientStart, command.gradient.start);
+    writeColor(constants.gradientEnd, command.gradient.end);
+    writeColor(constants.borderColor, command.border.color);
+    constants.rect[0] = command.rect.x;
+    constants.rect[1] = command.rect.y;
+    constants.rect[2] = command.rect.width;
+    constants.rect[3] = command.rect.height;
+    constants.flags[0] = command.opacity;
+    constants.flags[1] = command.shadowBlur;
+    constants.flags[2] = command.gradient.enabled && !command.shadowPass ? 1.0f : 0.0f;
+    constants.flags[3] = static_cast<float>(command.gradient.direction == core::GradientDirection::Horizontal ? 0 : 1);
+    constants.flags2[0] = command.shadowPass ? 1.0f : 0.0f;
 
-    const VkDeviceSize bufferOffset = static_cast<VkDeviceSize>(vertexOffset * sizeof(RoundedRectVertex));
+    const VkDeviceSize bufferOffset = static_cast<VkDeviceSize>(vertexOffset * sizeof(PrimitiveGeometryVertex));
     vkCmdBindPipeline(commandBuffers_[currentImage_], VK_PIPELINE_BIND_POINT_GRAPHICS, roundedRectPipeline_);
     vkCmdBindVertexBuffers(commandBuffers_[currentImage_], 0, 1, &primitiveVertexBuffer_, &bufferOffset);
     vkCmdPushConstants(commandBuffers_[currentImage_],
@@ -343,7 +345,7 @@ void VulkanRenderBackend::drawRoundedRect(const RoundedRectDrawData& data, int w
                        0,
                        sizeof(constants),
                        &constants);
-    vkCmdDraw(commandBuffers_[currentImage_], static_cast<std::uint32_t>(data.vertices.size()), 1, 0, 0);
+    vkCmdDraw(commandBuffers_[currentImage_], static_cast<std::uint32_t>(command.vertices.size()), 1, 0, 0);
 }
 
 bool VulkanRenderBackend::createInstance() {
@@ -746,18 +748,18 @@ bool VulkanRenderBackend::ensureRoundedRectPipeline() {
 
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
-    binding.stride = sizeof(RoundedRectVertex);
+    binding.stride = sizeof(PrimitiveGeometryVertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     std::array<VkVertexInputAttributeDescription, 2> attributes{};
     attributes[0].binding = 0;
     attributes[0].location = 0;
     attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributes[0].offset = offsetof(RoundedRectVertex, screenX);
+    attributes[0].offset = offsetof(PrimitiveGeometryVertex, screen);
     attributes[1].binding = 0;
     attributes[1].location = 1;
     attributes[1].format = VK_FORMAT_R32G32_SFLOAT;
-    attributes[1].offset = offsetof(RoundedRectVertex, localX);
+    attributes[1].offset = offsetof(PrimitiveGeometryVertex, local);
 
     VkPipelineVertexInputStateCreateInfo vertexInput{};
     vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -854,7 +856,7 @@ bool VulkanRenderBackend::ensurePrimitiveVertexBuffer(std::size_t vertexCount) {
         return false;
     }
     if (primitiveVertexBuffer_ == VK_NULL_HANDLE) {
-        const VkDeviceSize size = static_cast<VkDeviceSize>(kPrimitiveVertexCapacity * sizeof(RoundedRectVertex));
+        const VkDeviceSize size = static_cast<VkDeviceSize>(kPrimitiveVertexCapacity * sizeof(PrimitiveGeometryVertex));
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = size;

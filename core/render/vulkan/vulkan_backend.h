@@ -11,26 +11,6 @@
 
 namespace core::render::vulkan {
 
-struct RoundedRectVertex {
-    float screenX = 0.0f;
-    float screenY = 0.0f;
-    float screenW = 1.0f;
-    float localX = 0.0f;
-    float localY = 0.0f;
-};
-
-struct RoundedRectDrawData {
-    std::vector<RoundedRectVertex> vertices;
-    core::Color fillColor{};
-    core::Gradient gradient{};
-    core::Border border{};
-    core::Rect rect{};
-    float radius = 0.0f;
-    float opacity = 1.0f;
-    float shadowBlur = 1.0f;
-    bool shadowPass = false;
-};
-
 class VulkanRenderBackend final : public RenderBackend {
 public:
     explicit VulkanRenderBackend(core::window::Handle window, RenderBackend* shareBackend = nullptr);
@@ -52,7 +32,8 @@ public:
     void blitRenderCache(int width, int height) override;
     void clear(const core::Color& color) override;
     void setScissor(bool enabled, const core::Rect& rect, int framebufferHeight) override;
-    void drawRoundedRect(const RoundedRectDrawData& data, int windowWidth, int windowHeight);
+    void prepareBackdropBlur(const core::Rect& bounds, float blur, int windowWidth, int windowHeight) override;
+    void drawRoundedRect(const RoundedRectDrawCommand& command, int windowWidth, int windowHeight) override;
 
 private:
     bool createInstance();
