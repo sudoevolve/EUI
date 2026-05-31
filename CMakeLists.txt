@@ -48,7 +48,10 @@ set(CORE_SOURCES
 )
 
 if(EUI_RENDER_BACKEND STREQUAL "opengl")
-    list(APPEND CORE_SOURCES core/render/opengl/opengl_backend.cpp)
+    list(APPEND CORE_SOURCES
+        core/render/opengl/opengl_backend.cpp
+        core/render/opengl/opengl_primitives.cpp
+    )
 endif()
 
 if(EUI_WINDOW_BACKEND STREQUAL "glfw")
