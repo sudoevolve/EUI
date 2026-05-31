@@ -1,6 +1,6 @@
 #include "core/render/opengl/opengl_backend.h"
 
-#include "core/render/primitive.h"
+#include "core/render/render_types.h"
 
 #include <algorithm>
 #include <cmath>

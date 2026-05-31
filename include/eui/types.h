@@ -3,7 +3,7 @@
 #include "core/animation.h"
 #include "core/layout.h"
 #include "core/platform/event.h"
-#include "core/render/primitive.h"
+#include "core/render/render_types.h"
 #include "core/render/text.h"
 
 namespace eui {
