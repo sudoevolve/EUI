@@ -1,4 +1,5 @@
 #include "core/render/primitive.h"
+#include "core/render/primitive_geometry.h"
 
 #include <glad/glad.h>
 #include "core/window/window_backend.h"
@@ -482,60 +483,17 @@ private:
         return shader;
     }
 
-    Vec3 transformPoint(float x, float y) const {
-        if (hasTransformMatrix_) {
-            return core::transformPointWithW(transformMatrix_, x, y);
-        }
-
-        const Vec2 origin = {
-            bounds_.x + bounds_.width * transform_.origin.x,
-            bounds_.y + bounds_.height * transform_.origin.y
-        };
-
-        const float scaledX = (x - origin.x) * transform_.scale.x;
-        const float scaledY = (y - origin.y) * transform_.scale.y;
-        const float cosine = std::cos(transform_.rotate);
-        const float sine = std::sin(transform_.rotate);
-
-        return {
-            origin.x + scaledX * cosine - scaledY * sine + transform_.translate.x,
-            origin.y + scaledX * sine + scaledY * cosine + transform_.translate.y,
-            1.0f
-        };
-    }
-
-    static Rect expandRect(const Rect& rect, float amount) {
-        return {
-            rect.x - amount,
-            rect.y - amount,
-            rect.width + amount * 2.0f,
-            rect.height + amount * 2.0f
-        };
-    }
-
-    static Color withAlpha(Color color, float alphaScale) {
-        color.a *= alphaScale;
-        return color;
-    }
-
     void drawShadow(int windowWidth, int windowHeight) const {
         if (bounds_.width <= 0.0f || bounds_.height <= 0.0f ||
             opacity_ <= 0.001f || shadow_.color.a <= 0.001f) {
             return;
         }
 
-        Rect shadowShape = bounds_;
-        shadowShape.x += shadow_.offset.x - shadow_.spread;
-        shadowShape.y += shadow_.offset.y - shadow_.spread;
-        shadowShape.width += shadow_.spread * 2.0f;
-        shadowShape.height += shadow_.spread * 2.0f;
-
-        const float blur = std::max(shadow_.blur, 1.0f);
-        const float offsetMagnitude = std::max(std::fabs(shadow_.offset.x), std::fabs(shadow_.offset.y));
-        const float shadowBlur = blur * 1.08f;
-        const float shadowExtent = shadowBlur * 1.18f + offsetMagnitude * 0.20f + 1.0f;
-        drawLayer(windowWidth, windowHeight, expandRect(shadowShape, shadowExtent), shadowShape,
-                  true, withAlpha(shadow_.color, 0.74f), shadowBlur);
+        const Rect shadowShape = core::render::primitiveShadowShape(bounds_, shadow_);
+        const float shadowBlur = core::render::primitiveShadowBlur(shadow_);
+        const float shadowExtent = core::render::primitiveShadowExtent(shadow_, shadowBlur);
+        drawLayer(windowWidth, windowHeight, core::render::expandPrimitiveRect(shadowShape, shadowExtent), shadowShape,
+                  true, core::render::scalePrimitiveAlpha(shadow_.color, 0.74f), shadowBlur);
     }
 
     void drawLayer(int windowWidth,
@@ -545,27 +503,20 @@ private:
                    bool shadowPass,
                    const Color& layerColor,
                    float blur) const {
-        const float left = geometryBounds.x;
-        const float top = geometryBounds.y;
-        const float right = geometryBounds.x + geometryBounds.width;
-        const float bottom = geometryBounds.y + geometryBounds.height;
-
-        const Vec3 p0 = transformPoint(left, top);
-        const Vec3 p1 = transformPoint(right, top);
-        const Vec3 p2 = transformPoint(right, bottom);
-        const Vec3 p3 = transformPoint(left, bottom);
+        const auto geometryVertices = core::render::roundedRectGeometryVertices(
+            bounds_, transform_, transformMatrix_, hasTransformMatrix_, geometryBounds);
 
         const float vertices[] = {
-            p0.x, p0.y, p0.z, left, top,
-            p1.x, p1.y, p1.z, right, top,
-            p2.x, p2.y, p2.z, right, bottom,
-            p0.x, p0.y, p0.z, left, top,
-            p2.x, p2.y, p2.z, right, bottom,
-            p3.x, p3.y, p3.z, left, bottom
+            geometryVertices[0].screen.x, geometryVertices[0].screen.y, geometryVertices[0].screen.z, geometryVertices[0].local.x, geometryVertices[0].local.y,
+            geometryVertices[1].screen.x, geometryVertices[1].screen.y, geometryVertices[1].screen.z, geometryVertices[1].local.x, geometryVertices[1].local.y,
+            geometryVertices[2].screen.x, geometryVertices[2].screen.y, geometryVertices[2].screen.z, geometryVertices[2].local.x, geometryVertices[2].local.y,
+            geometryVertices[3].screen.x, geometryVertices[3].screen.y, geometryVertices[3].screen.z, geometryVertices[3].local.x, geometryVertices[3].local.y,
+            geometryVertices[4].screen.x, geometryVertices[4].screen.y, geometryVertices[4].screen.z, geometryVertices[4].local.x, geometryVertices[4].local.y,
+            geometryVertices[5].screen.x, geometryVertices[5].screen.y, geometryVertices[5].screen.z, geometryVertices[5].local.x, geometryVertices[5].local.y
         };
 
-        const float radius = std::clamp(cornerRadius_, 0.0f, std::min(sdfBounds.width, sdfBounds.height) * 0.5f);
-        const float borderWidth = shadowPass ? 0.0f : std::clamp(border_.width, 0.0f, std::min(sdfBounds.width, sdfBounds.height) * 0.5f);
+        const float radius = core::render::clampedPrimitiveRadius(cornerRadius_, sdfBounds);
+        const float borderWidth = shadowPass ? 0.0f : core::render::clampedPrimitiveBorderWidth(border_.width, sdfBounds);
 
         glUseProgram(shaderProgram_);
         glUniform2f(windowSizeLocation_, static_cast<float>(windowWidth), static_cast<float>(windowHeight));
@@ -708,7 +659,12 @@ public:
         std::vector<float> vertices;
         vertices.reserve(points_.size() * 2u);
         for (const Vec2& point : points_) {
-            const Vec2 transformed = transformPoint(bounds_.x + point.x, bounds_.y + point.y);
+            const Vec3 transformed = core::render::transformPrimitivePoint(bounds_,
+                                                                           transform_,
+                                                                           transformMatrix_,
+                                                                           hasTransformMatrix_,
+                                                                           bounds_.x + point.x,
+                                                                           bounds_.y + point.y);
             vertices.push_back(transformed.x);
             vertices.push_back(transformed.y);
         }
@@ -839,27 +795,6 @@ private:
         }
 
         return shader;
-    }
-
-    Vec2 transformPoint(float x, float y) const {
-        if (hasTransformMatrix_) {
-            return core::transformPoint(transformMatrix_, x, y);
-        }
-
-        const Vec2 origin = {
-            bounds_.x + bounds_.width * transform_.origin.x,
-            bounds_.y + bounds_.height * transform_.origin.y
-        };
-
-        const float scaledX = (x - origin.x) * transform_.scale.x;
-        const float scaledY = (y - origin.y) * transform_.scale.y;
-        const float cosine = std::cos(transform_.rotate);
-        const float sine = std::sin(transform_.rotate);
-
-        return {
-            origin.x + scaledX * cosine - scaledY * sine + transform_.translate.x,
-            origin.y + scaledX * sine + scaledY * cosine + transform_.translate.y
-        };
     }
 
     Rect bounds_;

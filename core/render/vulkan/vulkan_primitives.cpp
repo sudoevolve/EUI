@@ -1,9 +1,9 @@
 #include "core/render/primitive.h"
+#include "core/render/primitive_geometry.h"
 #include "core/render/render_backend.h"
 #include "core/render/vulkan/vulkan_backend.h"
 
 #include <algorithm>
-#include <cmath>
 
 namespace core {
 
@@ -11,20 +11,6 @@ namespace {
 
 core::render::vulkan::VulkanRenderBackend* activeVulkanBackend() {
     return static_cast<core::render::vulkan::VulkanRenderBackend*>(core::render::activeRenderBackend());
-}
-
-Rect expandRect(const Rect& rect, float amount) {
-    return {
-        rect.x - amount,
-        rect.y - amount,
-        rect.width + amount * 2.0f,
-        rect.height + amount * 2.0f
-    };
-}
-
-Color withAlpha(Color color, float alphaScale) {
-    color.a *= alphaScale;
-    return color;
 }
 
 } // namespace
@@ -45,27 +31,6 @@ struct RoundedRectPrimitive::Impl {
     float opacity = 1.0f;
     bool hasTransformMatrix = false;
 
-    Vec3 transformPoint(float x, float y) const {
-        if (hasTransformMatrix) {
-            return core::transformPointWithW(transformMatrix, x, y);
-        }
-
-        const Vec2 origin = {
-            bounds.x + bounds.width * transform.origin.x,
-            bounds.y + bounds.height * transform.origin.y
-        };
-        const float scaledX = (x - origin.x) * transform.scale.x;
-        const float scaledY = (y - origin.y) * transform.scale.y;
-        const float cosine = std::cos(transform.rotate);
-        const float sine = std::sin(transform.rotate);
-
-        return {
-            origin.x + scaledX * cosine - scaledY * sine + transform.translate.x,
-            origin.y + scaledX * sine + scaledY * cosine + transform.translate.y,
-            1.0f
-        };
-    }
-
     void drawLayer(int windowWidth,
                    int windowHeight,
                    const Rect& geometryBounds,
@@ -78,31 +43,20 @@ struct RoundedRectPrimitive::Impl {
             return;
         }
 
-        const float left = geometryBounds.x;
-        const float top = geometryBounds.y;
-        const float right = geometryBounds.x + geometryBounds.width;
-        const float bottom = geometryBounds.y + geometryBounds.height;
-
-        const Vec3 p0 = transformPoint(left, top);
-        const Vec3 p1 = transformPoint(right, top);
-        const Vec3 p2 = transformPoint(right, bottom);
-        const Vec3 p3 = transformPoint(left, bottom);
+        const auto vertices = core::render::roundedRectGeometryVertices(
+            bounds, transform, transformMatrix, hasTransformMatrix, geometryBounds);
 
         core::render::vulkan::RoundedRectDrawData data{};
-        data.vertices = {
-            core::render::vulkan::RoundedRectVertex{p0.x, p0.y, p0.z, left, top},
-            core::render::vulkan::RoundedRectVertex{p1.x, p1.y, p1.z, right, top},
-            core::render::vulkan::RoundedRectVertex{p2.x, p2.y, p2.z, right, bottom},
-            core::render::vulkan::RoundedRectVertex{p0.x, p0.y, p0.z, left, top},
-            core::render::vulkan::RoundedRectVertex{p2.x, p2.y, p2.z, right, bottom},
-            core::render::vulkan::RoundedRectVertex{p3.x, p3.y, p3.z, left, bottom}
-        };
+        data.vertices.reserve(vertices.size());
+        for (const core::render::PrimitiveGeometryVertex& vertex : vertices) {
+            data.vertices.push_back({vertex.screen.x, vertex.screen.y, vertex.screen.z, vertex.local.x, vertex.local.y});
+        }
         data.fillColor = shadowPass ? layerColor : color;
         data.gradient = gradient;
         data.border = shadowPass ? Border{} : border;
         data.rect = sdfBounds;
-        data.radius = std::clamp(cornerRadius, 0.0f, std::min(sdfBounds.width, sdfBounds.height) * 0.5f);
-        data.border.width = std::clamp(data.border.width, 0.0f, std::min(sdfBounds.width, sdfBounds.height) * 0.5f);
+        data.radius = core::render::clampedPrimitiveRadius(cornerRadius, sdfBounds);
+        data.border.width = core::render::clampedPrimitiveBorderWidth(data.border.width, sdfBounds);
         data.opacity = opacity;
         data.shadowBlur = layerBlur;
         data.shadowPass = shadowPass;
@@ -115,18 +69,11 @@ struct RoundedRectPrimitive::Impl {
             return;
         }
 
-        Rect shadowShape = bounds;
-        shadowShape.x += shadow.offset.x - shadow.spread;
-        shadowShape.y += shadow.offset.y - shadow.spread;
-        shadowShape.width += shadow.spread * 2.0f;
-        shadowShape.height += shadow.spread * 2.0f;
-
-        const float blur = std::max(shadow.blur, 1.0f);
-        const float offsetMagnitude = std::max(std::fabs(shadow.offset.x), std::fabs(shadow.offset.y));
-        const float shadowBlur = blur * 1.08f;
-        const float shadowExtent = shadowBlur * 1.18f + offsetMagnitude * 0.20f + 1.0f;
-        drawLayer(windowWidth, windowHeight, expandRect(shadowShape, shadowExtent), shadowShape,
-                  true, withAlpha(shadow.color, 0.74f), shadowBlur);
+        const Rect shadowShape = core::render::primitiveShadowShape(bounds, shadow);
+        const float shadowBlur = core::render::primitiveShadowBlur(shadow);
+        const float shadowExtent = core::render::primitiveShadowExtent(shadow, shadowBlur);
+        drawLayer(windowWidth, windowHeight, core::render::expandPrimitiveRect(shadowShape, shadowExtent), shadowShape,
+                  true, core::render::scalePrimitiveAlpha(shadow.color, 0.74f), shadowBlur);
     }
 };
 
@@ -201,27 +148,6 @@ struct PolygonPrimitive::Impl {
     TransformMatrix transformMatrix{};
     float opacity = 1.0f;
     bool hasTransformMatrix = false;
-
-    Vec3 transformPoint(float x, float y) const {
-        if (hasTransformMatrix) {
-            return core::transformPointWithW(transformMatrix, x, y);
-        }
-
-        const Vec2 origin = {
-            bounds.x + bounds.width * transform.origin.x,
-            bounds.y + bounds.height * transform.origin.y
-        };
-        const float scaledX = (x - origin.x) * transform.scale.x;
-        const float scaledY = (y - origin.y) * transform.scale.y;
-        const float cosine = std::cos(transform.rotate);
-        const float sine = std::sin(transform.rotate);
-
-        return {
-            origin.x + scaledX * cosine - scaledY * sine + transform.translate.x,
-            origin.y + scaledX * sine + scaledY * cosine + transform.translate.y,
-            1.0f
-        };
-    }
 };
 
 PolygonPrimitive::PolygonPrimitive()
@@ -255,17 +181,17 @@ void PolygonPrimitive::render(int windowWidth, int windowHeight) const {
     }
 
     core::render::vulkan::RoundedRectDrawData data{};
-    data.vertices.reserve((impl_->points.size() - 2u) * 3u);
-    auto appendPoint = [&](const Vec2& point) {
-        const float localX = impl_->bounds.x + point.x;
-        const float localY = impl_->bounds.y + point.y;
-        const Vec3 transformed = impl_->transformPoint(localX, localY);
-        data.vertices.push_back({transformed.x, transformed.y, transformed.z, localX, localY});
-    };
-    for (std::size_t i = 1; i + 1 < impl_->points.size(); ++i) {
-        appendPoint(impl_->points.front());
-        appendPoint(impl_->points[i]);
-        appendPoint(impl_->points[i + 1]);
+    std::vector<core::render::PrimitiveGeometryVertex> vertices;
+    vertices.reserve((impl_->points.size() - 2u) * 3u);
+    core::render::appendPolygonTriangleFan(vertices,
+                                           impl_->bounds,
+                                           impl_->transform,
+                                           impl_->transformMatrix,
+                                           impl_->hasTransformMatrix,
+                                           impl_->points);
+    data.vertices.reserve(vertices.size());
+    for (const core::render::PrimitiveGeometryVertex& vertex : vertices) {
+        data.vertices.push_back({vertex.screen.x, vertex.screen.y, vertex.screen.z, vertex.local.x, vertex.local.y});
     }
 
     data.fillColor = impl_->color;
