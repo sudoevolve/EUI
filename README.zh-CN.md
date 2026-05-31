@@ -38,6 +38,7 @@ EUI-NEO 是一个基于 C++17、OpenGL 和 GLFW 的跨平台高性能轻量级 U
 - CMake 3.14+
 - 支持 C++17 的编译器
 - OpenGL
+- Vulkan SDK 可选。默认渲染后端选择是 `auto`：EUI Vulkan 后端可用且检测到 SDK 时使用 Vulkan，否则回退 OpenGL。
 - 平台 OpenGL/windowing 开发文件。Linux 构建还需要 X11 和 libcurl 开发包。
 
 GLFW、glad、tray、FreeType、HarfBuzz、libpng、zlib 等构建期第三方源码已内置在 `3rd/` 下。默认依赖模式是 `auto`：本地 `3rd/` 源码存在时直接使用，缺失时才从固定上游地址联网拉取。需要严格离线构建时，可配置 `-DEUI_DEPS_MODE=bundled`；需要强制联网拉取时，可配置 `-DEUI_DEPS_MODE=fetch`。HarfBuzz shaping 默认启用，可通过 `-DEUI_ENABLE_HARFBUZZ=OFF` 关闭。

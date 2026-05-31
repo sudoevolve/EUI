@@ -9,7 +9,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "EUI_WINDOW_BACKEND": "glfw",
-        "EUI_RENDER_BACKEND": "opengl",
+        "EUI_RENDER_BACKEND": "auto",
         "EUI_DEPS_MODE": "auto"
       }
     },
@@ -21,7 +21,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "EUI_WINDOW_BACKEND": "glfw",
-        "EUI_RENDER_BACKEND": "opengl",
+        "EUI_RENDER_BACKEND": "auto",
         "EUI_DEPS_MODE": "auto"
       }
     },
@@ -33,7 +33,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "EUI_WINDOW_BACKEND": "sdl2",
-        "EUI_RENDER_BACKEND": "opengl",
+        "EUI_RENDER_BACKEND": "auto",
         "EUI_DEPS_MODE": "auto"
       }
     },
@@ -45,7 +45,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "EUI_WINDOW_BACKEND": "sdl2",
-        "EUI_RENDER_BACKEND": "opengl",
+        "EUI_RENDER_BACKEND": "auto",
         "EUI_DEPS_MODE": "auto"
       }
     },
@@ -57,7 +57,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "EUI_WINDOW_BACKEND": "sdl2",
-        "EUI_RENDER_BACKEND": "opengl",
+        "EUI_RENDER_BACKEND": "auto",
         "EUI_DEPS_MODE": "fetch"
       }
     }

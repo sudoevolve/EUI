@@ -38,6 +38,7 @@ Requirements:
 - CMake 3.14+
 - A C++17 compiler
 - OpenGL
+- Vulkan SDK is optional. The default render backend selection is `auto`: use Vulkan when the EUI Vulkan backend is available and the SDK is found, otherwise fall back to OpenGL.
 - Platform OpenGL/windowing development files. Linux builds also need X11 and libcurl development packages.
 
 Build-time sources for GLFW, glad, tray, FreeType, HarfBuzz, libpng, and zlib are vendored under `3rd/`. The default dependency mode is `auto`: CMake uses the local `3rd/` sources when they are present, and fetches only missing dependencies from pinned upstream URLs. Use `-DEUI_DEPS_MODE=bundled` for strict offline builds, or `-DEUI_DEPS_MODE=fetch` to force online dependency fetches. HarfBuzz shaping is enabled by default and can be disabled with `-DEUI_ENABLE_HARFBUZZ=OFF`.
