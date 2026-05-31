@@ -1,9 +1,108 @@
 #include "core/render/primitive.h"
+#include "core/render/render_backend.h"
+#include "core/render/vulkan/vulkan_backend.h"
 
 #include <algorithm>
-#include <utility>
+#include <array>
+#include <cmath>
 
 namespace core {
+
+namespace {
+
+Vec2 transformedPoint(float x,
+                      float y,
+                      const Rect& bounds,
+                      const Transform& transform,
+                      const TransformMatrix& matrix,
+                      bool hasTransformMatrix) {
+    if (hasTransformMatrix) {
+        return transformPoint(matrix, x, y);
+    }
+
+    const Vec2 origin = {
+        bounds.x + bounds.width * transform.origin.x,
+        bounds.y + bounds.height * transform.origin.y
+    };
+    const float scaledX = (x - origin.x) * transform.scale.x;
+    const float scaledY = (y - origin.y) * transform.scale.y;
+    const float cosine = std::cos(transform.rotate);
+    const float sine = std::sin(transform.rotate);
+
+    return {
+        origin.x + scaledX * cosine - scaledY * sine + transform.translate.x,
+        origin.y + scaledX * sine + scaledY * cosine + transform.translate.y
+    };
+}
+
+Rect transformedBounds(const Rect& bounds, const Transform& transform, const TransformMatrix& matrix, bool hasTransformMatrix) {
+    const std::array<Vec2, 4> corners = {
+        transformedPoint(bounds.x, bounds.y, bounds, transform, matrix, hasTransformMatrix),
+        transformedPoint(bounds.x + bounds.width, bounds.y, bounds, transform, matrix, hasTransformMatrix),
+        transformedPoint(bounds.x + bounds.width, bounds.y + bounds.height, bounds, transform, matrix, hasTransformMatrix),
+        transformedPoint(bounds.x, bounds.y + bounds.height, bounds, transform, matrix, hasTransformMatrix)
+    };
+    float left = corners[0].x;
+    float right = corners[0].x;
+    float top = corners[0].y;
+    float bottom = corners[0].y;
+    for (const Vec2& corner : corners) {
+        left = std::min(left, corner.x);
+        right = std::max(right, corner.x);
+        top = std::min(top, corner.y);
+        bottom = std::max(bottom, corner.y);
+    }
+    return {left, top, right - left, bottom - top};
+}
+
+Rect transformedPolygonBounds(const Rect& bounds,
+                              const std::vector<Vec2>& points,
+                              const Transform& transform,
+                              const TransformMatrix& matrix,
+                              bool hasTransformMatrix) {
+    if (points.empty()) {
+        return {};
+    }
+    Vec2 first = transformedPoint(bounds.x + points.front().x,
+                                  bounds.y + points.front().y,
+                                  bounds,
+                                  transform,
+                                  matrix,
+                                  hasTransformMatrix);
+
+    float left = first.x;
+    float right = first.x;
+    float top = first.y;
+    float bottom = first.y;
+    for (const Vec2& point : points) {
+        Vec2 transformed = transformedPoint(bounds.x + point.x,
+                                            bounds.y + point.y,
+                                            bounds,
+                                            transform,
+                                            matrix,
+                                            hasTransformMatrix);
+        left = std::min(left, transformed.x);
+        right = std::max(right, transformed.x);
+        top = std::min(top, transformed.y);
+        bottom = std::max(bottom, transformed.y);
+    }
+    return {left, top, right - left, bottom - top};
+}
+
+void fillRectWithActiveBackend(const Rect& rect, const Color& color, float opacity, int windowWidth, int windowHeight) {
+    if (opacity <= 0.0f || color.a <= 0.0f) {
+        return;
+    }
+    core::render::RenderBackend* backend = core::render::activeRenderBackend();
+    if (backend == nullptr) {
+        return;
+    }
+    Color resolved = color;
+    resolved.a *= opacity;
+    static_cast<core::render::vulkan::VulkanRenderBackend*>(backend)->fillRect(rect, resolved, windowWidth, windowHeight);
+}
+
+} // namespace
 
 struct RoundedRectPrimitive::Impl {
     explicit Impl(float x = 0.0f, float y = 0.0f, float width = 0.0f, float height = 0.0f)
@@ -75,7 +174,11 @@ float RoundedRectPrimitive::blur() const { return impl_->blur; }
 const Transform& RoundedRectPrimitive::transform() const { return impl_->transform; }
 float RoundedRectPrimitive::cornerRadius() const { return impl_->cornerRadius; }
 float RoundedRectPrimitive::opacity() const { return impl_->opacity; }
-void RoundedRectPrimitive::render(int, int) const {}
+void RoundedRectPrimitive::render(int windowWidth, int windowHeight) const {
+    Color fill = impl_->gradient.enabled ? mixColor(impl_->gradient.start, impl_->gradient.end, 0.5f) : impl_->color;
+    const Rect rect = transformedBounds(impl_->bounds, impl_->transform, impl_->transformMatrix, impl_->hasTransformMatrix);
+    fillRectWithActiveBackend(rect, fill, impl_->opacity, windowWidth, windowHeight);
+}
 
 struct PolygonPrimitive::Impl {
     Rect bounds{};
@@ -108,6 +211,13 @@ void PolygonPrimitive::setTransformMatrix(const TransformMatrix& matrix) {
     impl_->transformMatrix = matrix;
     impl_->hasTransformMatrix = true;
 }
-void PolygonPrimitive::render(int, int) const {}
+void PolygonPrimitive::render(int windowWidth, int windowHeight) const {
+    const Rect rect = transformedPolygonBounds(impl_->bounds,
+                                               impl_->points,
+                                               impl_->transform,
+                                               impl_->transformMatrix,
+                                               impl_->hasTransformMatrix);
+    fillRectWithActiveBackend(rect, impl_->color, impl_->opacity, windowWidth, windowHeight);
+}
 
 } // namespace core

@@ -13,6 +13,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <set>
 
@@ -190,7 +191,65 @@ void VulkanRenderBackend::clear(const core::Color& color) {
     }
 }
 
-void VulkanRenderBackend::setScissor(bool, const core::Rect&, int) {}
+void VulkanRenderBackend::setScissor(bool enabled, const core::Rect& rect, int) {
+    scissorEnabled_ = enabled;
+    scissorRect_ = rect;
+}
+
+void VulkanRenderBackend::fillRect(const core::Rect& rect, const core::Color& color, int windowWidth, int windowHeight) {
+    if (!frameActive_ || rect.width <= 0.0f || rect.height <= 0.0f || color.a <= 0.0f) {
+        return;
+    }
+    if (!frameRecorded_) {
+        recordClearPass(clearColor_);
+    }
+    if (!renderPassActive_) {
+        return;
+    }
+
+    core::Rect clipped = rect;
+    const core::Rect framebufferRect{0.0f, 0.0f, static_cast<float>(windowWidth), static_cast<float>(windowHeight)};
+    auto intersect = [](const core::Rect& a, const core::Rect& b, core::Rect& out) {
+        const float left = std::max(a.x, b.x);
+        const float top = std::max(a.y, b.y);
+        const float right = std::min(a.x + a.width, b.x + b.width);
+        const float bottom = std::min(a.y + a.height, b.y + b.height);
+        if (right <= left || bottom <= top) {
+            return false;
+        }
+        out = {left, top, right - left, bottom - top};
+        return true;
+    };
+    if (!intersect(clipped, framebufferRect, clipped)) {
+        return;
+    }
+    if (scissorEnabled_ && !intersect(clipped, scissorRect_, clipped)) {
+        return;
+    }
+
+    const int32_t x = static_cast<int32_t>(std::floor(clipped.x));
+    const int32_t y = static_cast<int32_t>(std::floor(clipped.y));
+    const int32_t right = static_cast<int32_t>(std::ceil(clipped.x + clipped.width));
+    const int32_t bottom = static_cast<int32_t>(std::ceil(clipped.y + clipped.height));
+    if (right <= x || bottom <= y) {
+        return;
+    }
+
+    VkClearAttachment attachment{};
+    attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    attachment.colorAttachment = 0;
+    attachment.clearValue.color = {{color.r, color.g, color.b, color.a}};
+
+    VkClearRect clearRect{};
+    clearRect.rect.offset = {x, y};
+    clearRect.rect.extent = {
+        static_cast<std::uint32_t>(right - x),
+        static_cast<std::uint32_t>(bottom - y)
+    };
+    clearRect.baseArrayLayer = 0;
+    clearRect.layerCount = 1;
+    vkCmdClearAttachments(commandBuffers_[currentImage_], 1, &attachment, 1, &clearRect);
+}
 
 bool VulkanRenderBackend::createInstance() {
     VkApplicationInfo appInfo{};
