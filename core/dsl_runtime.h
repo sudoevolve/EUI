@@ -204,6 +204,9 @@ public:
         const RenderTransform identity;
         const std::vector<const Element*> roots = orderedElements(ui_.roots());
         for (const Element* root : roots) {
+            prepareTextElement(*root, windowWidth, windowHeight, dpiScale, identity);
+        }
+        for (const Element* root : roots) {
             renderElement(*renderBackend, *root, windowWidth, windowHeight, dpiScale, identity);
         }
     }
@@ -2002,7 +2005,58 @@ private:
         const Rect scissor = dirtyRect ? *dirtyRect : Rect{};
         const std::vector<const Element*> roots = orderedElements(ui_.roots());
         for (const Element* root : roots) {
+            prepareTextElement(*root, windowWidth, windowHeight, dpiScale, identity, dirtyRect, hasScissor, scissor);
+        }
+        for (const Element* root : roots) {
             renderElement(renderBackend, *root, windowWidth, windowHeight, dpiScale, identity, dirtyRect, hasScissor, scissor);
+        }
+    }
+
+    void prepareTextElement(const Element& element,
+                            int windowWidth,
+                            int windowHeight,
+                            float dpiScale,
+                            const RenderTransform& inheritedTransform,
+                            const Rect* dirtyRect = nullptr,
+                            bool hasScissor = false,
+                            const Rect& scissorRect = {}) {
+        const RenderTransform renderTransform = resolveRenderTransform(element, dpiScale, inheritedTransform);
+        if (renderTransform.opacity <= 0.001f) {
+            return;
+        }
+
+        Rect effectiveScissor = scissorRect;
+        bool effectiveHasScissor = hasScissor;
+        if (element.clip) {
+            Rect clipFrame = applyRenderTransform(toPixelRect(element.frame, dpiScale), renderTransform);
+            if (effectiveHasScissor) {
+                if (!intersectRect(effectiveScissor, clipFrame, effectiveScissor)) {
+                    return;
+                }
+            } else {
+                effectiveScissor = clipFrame;
+                effectiveHasScissor = true;
+            }
+        }
+
+        if (element.kind == ElementKind::Text) {
+            TextInstance& instance = textInstance(element.id);
+            Rect frame = toPixelRect(transformRect({instance.frame.value().x,
+                                                    instance.frame.value().y,
+                                                    instance.frame.value().width,
+                                                    instance.frame.value().height},
+                                                   instance.frame.value(),
+                                                   instance.transform.value()), dpiScale);
+            frame = applyRenderTransform(frame, renderTransform);
+            if ((!dirtyRect || intersects(frame, *dirtyRect)) &&
+                (!effectiveHasScissor || intersects(frame, effectiveScissor))) {
+                prepareText(element, windowWidth, windowHeight, dpiScale, renderTransform);
+            }
+        }
+
+        const std::vector<const Element*> children = orderedElements(element.children);
+        for (const Element* child : children) {
+            prepareTextElement(*child, windowWidth, windowHeight, dpiScale, renderTransform, dirtyRect, effectiveHasScissor, effectiveScissor);
         }
     }
 
@@ -2146,6 +2200,56 @@ private:
         instance.primitive->setOpacity(instance.opacity.value() * renderTransform.opacity);
         instance.primitive->setTransformMatrix(combinedPrimitiveMatrix(renderTransform, frame, transform));
         instance.primitive->render(windowWidth, windowHeight);
+    }
+
+    void prepareText(const Element& element,
+                     int,
+                     int,
+                     float dpiScale,
+                     const RenderTransform& renderTransform) {
+        TextInstance& instance = textInstance(element.id);
+        if (!instance.initialized) {
+            instance.initialized = instance.primitive->initialize();
+            if (!instance.initialized) {
+                return;
+            }
+        }
+
+        const Rect frame = toPixelRect(instance.frame.value(), dpiScale);
+        const float maxWidth = element.maxWidth > 0.0f ? toPixels(element.maxWidth, dpiScale) : frame.width;
+        const float lineHeight = element.lineHeight > 0.0f ? toPixels(element.lineHeight, dpiScale) : 0.0f;
+        Color textColor = instance.color.value();
+        Transform transform = scaleTransform(instance.transform.value(), dpiScale);
+        textColor.a *= instance.opacity.value();
+
+        float x = frame.x;
+        if (element.horizontalAlign == HorizontalAlign::Center) {
+            x = frame.x + frame.width * 0.5f;
+        } else if (element.horizontalAlign == HorizontalAlign::Right) {
+            x = frame.x + frame.width;
+        }
+
+        float y = frame.y;
+        if (element.verticalAlign == VerticalAlign::Center) {
+            y = frame.y + frame.height * 0.5f;
+        } else if (element.verticalAlign == VerticalAlign::Bottom) {
+            y = frame.y + frame.height;
+        }
+        textColor.a *= renderTransform.opacity;
+
+        instance.primitive->setPosition(x, y);
+        instance.primitive->setTransformMatrix(combinedPrimitiveMatrix(renderTransform, frame, transform));
+        instance.primitive->setColor(textColor);
+        instance.primitive->setText(instance.text);
+        instance.primitive->setFontFamily(instance.fontFamily);
+        instance.primitive->setFontSize(toPixels(instance.fontSize, dpiScale));
+        instance.primitive->setFontWeight(instance.fontWeight);
+        instance.primitive->setMaxWidth(maxWidth);
+        instance.primitive->setWrap(instance.wrap);
+        instance.primitive->setHorizontalAlign(instance.horizontalAlign);
+        instance.primitive->setVerticalAlign(instance.verticalAlign);
+        instance.primitive->setLineHeight(lineHeight);
+        instance.primitive->prepare();
     }
 
     void renderText(const Element& element,

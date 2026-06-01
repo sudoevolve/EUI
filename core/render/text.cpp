@@ -962,6 +962,7 @@ struct TextPrimitive::Impl {
                                           int fontWeight = 400);
     static void setDefaultFontFiles(const std::string& textFontFile, const std::string& iconFontFile);
 
+    void prepare();
     void render(int windowWidth, int windowHeight);
 
     bool loadFont();
@@ -1229,18 +1230,22 @@ void TextPrimitive::Impl::setDefaultFontFiles(const std::string& textFontFile, c
     defaultIconFontFileOverride() = iconFontFile;
 }
 
-void TextPrimitive::Impl::render(int windowWidth, int windowHeight) {
-    core::render::RenderBackend* backend = core::render::activeRenderBackend();
-    if (backend == nullptr || windowWidth <= 0 || windowHeight <= 0) {
-        return;
-    }
-
+void TextPrimitive::Impl::prepare() {
     if (layoutDirty_) {
         rebuildLayout();
     }
     if (verticesDirty_) {
         rebuildVertices();
     }
+}
+
+void TextPrimitive::Impl::render(int windowWidth, int windowHeight) {
+    core::render::RenderBackend* backend = core::render::activeRenderBackend();
+    if (backend == nullptr || windowWidth <= 0 || windowHeight <= 0) {
+        return;
+    }
+
+    prepare();
 
     if (vertices_.empty()) {
         return;
@@ -1712,6 +1717,7 @@ void TextPrimitive::setTransformMatrix(const TransformMatrix& matrix) { impl_->s
 const TextStyle& TextPrimitive::style() const { return impl_->style(); }
 Vec2 TextPrimitive::position() const { return impl_->position(); }
 Vec2 TextPrimitive::measuredSize() { return impl_->measuredSize(); }
+void TextPrimitive::prepare() { impl_->prepare(); }
 float TextPrimitive::measureTextWidth(const std::string& text,
                                       const std::string& fontFamily,
                                       float fontSize,

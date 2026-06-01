@@ -133,22 +133,23 @@ endif()
 if(EUI_WINDOW_BACKEND STREQUAL "sdl2")
     if(EUI_DEPS_MODE STREQUAL "bundled")
         message(FATAL_ERROR
-            "SDL2 is not vendored under 3rd/. Use -DEUI_DEPS_MODE=auto with a system SDL2 package, "
-            "or -DEUI_DEPS_MODE=fetch to download SDL2 when building with -DEUI_WINDOW_BACKEND=sdl2."
+            "SDL2 is not vendored under 3rd/. Use -DEUI_DEPS_MODE=auto to prefer a system SDL2 package "
+            "and fall back to fetching SDL2, or use -DEUI_DEPS_MODE=fetch to always download SDL2."
         )
     endif()
 
+    set(EUI_FETCH_SDL2 OFF)
     if(EUI_DEPS_MODE STREQUAL "auto")
         find_package(SDL2 CONFIG QUIET)
         if(NOT TARGET SDL2::SDL2)
-            message(FATAL_ERROR
-                "System SDL2 package was not found. Install SDL2 development files, or configure with "
-                "-DEUI_WINDOW_BACKEND=sdl2 -DEUI_DEPS_MODE=fetch to download SDL2."
-            )
+            message(STATUS "System SDL2 package was not found; fetching SDL2 instead.")
+            set(EUI_FETCH_SDL2 ON)
         endif()
+    elseif(EUI_DEPS_MODE STREQUAL "fetch")
+        set(EUI_FETCH_SDL2 ON)
     endif()
 
-    if(EUI_DEPS_MODE STREQUAL "fetch")
+    if(EUI_FETCH_SDL2)
         set(SDL_SHARED OFF CACHE BOOL "Build a shared version of SDL2" FORCE)
         set(SDL_STATIC ON CACHE BOOL "Build a static version of SDL2" FORCE)
         set(SDL_TEST OFF CACHE BOOL "Build the SDL2_test library" FORCE)
