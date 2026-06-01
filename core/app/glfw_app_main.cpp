@@ -150,11 +150,12 @@ void waitForNextFrame(GLFWwindow* window, const WindowState& windowState) {
     }
 }
 
-void hideWindowToTray(GLFWwindow* window, WindowState& windowState) {
+void hideWindowToTray(GLFWwindow* window, WindowState& windowState, core::render::RenderBackend& renderBackend) {
     if (!windowState.trayAvailable || windowState.hiddenToTray) {
         return;
     }
 
+    core::render::ScopedRenderBackend scopedRenderBackend(renderBackend);
     app::releaseGraphicsResources();
     glfwHideWindow(window);
     windowState.hiddenToTray = true;
@@ -258,7 +259,12 @@ void destroyManagedWindow(std::unique_ptr<ManagedWindow>& managed) {
         managed->renderBackend->releaseRenderCache();
     }
     core::releaseInputQueue(windowToDestroy);
-    managed->content.shutdown(false);
+    if (managed->renderBackend) {
+        core::render::ScopedRenderBackend scopedRenderBackend(*managed->renderBackend);
+        managed->content.shutdown(false);
+    } else {
+        managed->content.shutdown(false);
+    }
     managed->renderBackend.reset();
     core::window::destroyWindow(windowToDestroy);
     managed.reset();
@@ -418,7 +424,7 @@ int main() {
         }
         if (windowState.hideToTrayRequested) {
             renderBackend->releaseRenderCache();
-            hideWindowToTray(window, windowState);
+            hideWindowToTray(window, windowState, *renderBackend);
         }
         if (windowState.hiddenToTray) {
             glfwWaitEventsTimeout(0.10);
@@ -495,7 +501,10 @@ int main() {
     renderBackend->makeCurrent();
     renderBackend->releaseRenderCache();
     core::platform::shutdownTray();
-    app::shutdown();
+    {
+        core::render::ScopedRenderBackend scopedRenderBackend(*renderBackend);
+        app::shutdown();
+    }
     renderBackend.reset();
     glfwTerminate();
     return 0;

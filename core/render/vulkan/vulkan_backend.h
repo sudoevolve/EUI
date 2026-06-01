@@ -70,6 +70,10 @@ private:
     void destroy();
     void recordClearPass(const core::Color& color);
     void beginLoadPass();
+    void destroyRenderCacheResources();
+    void transitionRenderCacheImage(VkImageLayout newLayout);
+    VkExtent2D currentRenderExtent() const;
+    VkFramebuffer currentFramebuffer() const;
     bool ensureRoundedRectPipeline();
     bool ensureBackdropResources();
     bool ensureBackdropDescriptor();
@@ -92,6 +96,7 @@ private:
     void destroyImagePipeline();
     void destroyImageResources();
     void destroyTextureResource(TextureResource& texture);
+    void releasePendingTextureDeletes();
     void releasePendingUploads();
     void transitionSwapchainImage(VkImageLayout newLayout);
     std::uint32_t findMemoryType(std::uint32_t filter, VkMemoryPropertyFlags properties) const;
@@ -126,6 +131,7 @@ private:
     bool renderPassActive_ = false;
     bool scissorEnabled_ = false;
     bool swapchainTransferSrcSupported_ = false;
+    bool swapchainTransferDstSupported_ = false;
     bool backdropReady_ = false;
     core::Rect scissorRect_{};
     core::Color clearColor_{0.0f, 0.0f, 0.0f, 1.0f};
@@ -146,6 +152,15 @@ private:
     void* primitiveVertexMapped_ = nullptr;
     std::size_t primitiveVertexCapacity_ = 0;
     std::size_t primitiveVertexUsed_ = 0;
+
+    VkImage renderCacheImage_ = VK_NULL_HANDLE;
+    VkDeviceMemory renderCacheMemory_ = VK_NULL_HANDLE;
+    VkImageView renderCacheView_ = VK_NULL_HANDLE;
+    VkFramebuffer renderCacheFramebuffer_ = VK_NULL_HANDLE;
+    VkImageLayout renderCacheLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkExtent2D renderCacheExtent_{};
+    bool renderCacheRecreated_ = false;
+    bool renderingToCache_ = false;
 
     VkDescriptorSetLayout textDescriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool textDescriptorPool_ = VK_NULL_HANDLE;
@@ -171,6 +186,7 @@ private:
     std::size_t imageVertexUsed_ = 0;
     std::vector<VkBuffer> pendingUploadBuffers_;
     std::vector<VkDeviceMemory> pendingUploadMemories_;
+    std::vector<TextureResource*> pendingTextureDeletes_;
 };
 
 } // namespace core::render::vulkan

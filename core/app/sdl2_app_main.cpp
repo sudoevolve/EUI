@@ -141,9 +141,13 @@ void hideToTray(SDL_Window* window, WindowState& state) {
         return;
     }
     if (state.renderBackend != nullptr) {
+        state.renderBackend->makeCurrent();
         state.renderBackend->releaseRenderCache();
+        core::render::ScopedRenderBackend scopedRenderBackend(*state.renderBackend);
+        app::releaseGraphicsResources();
+    } else {
+        app::releaseGraphicsResources();
     }
-    app::releaseGraphicsResources();
     SDL_HideWindow(window);
     state.hiddenToTray = true;
     state.needsRender = false;
@@ -281,7 +285,12 @@ void destroyManagedWindow(std::unique_ptr<ManagedWindow>& managed) {
             managed->renderBackend->releaseRenderCache();
         }
         core::releaseInputQueue(managed->window);
-        managed->content.shutdown(false);
+        if (managed->renderBackend) {
+            core::render::ScopedRenderBackend scopedRenderBackend(*managed->renderBackend);
+            managed->content.shutdown(false);
+        } else {
+            managed->content.shutdown(false);
+        }
         managed->renderBackend.reset();
         core::window::destroyWindow(managed->window);
     }
@@ -546,7 +555,10 @@ int main() {
     core::platform::shutdownTray();
     renderBackend->makeCurrent();
     renderBackend->releaseRenderCache();
-    app::shutdown();
+    {
+        core::render::ScopedRenderBackend scopedRenderBackend(*renderBackend);
+        app::shutdown();
+    }
     renderBackend.reset();
     SDL_StopTextInput();
     core::window::destroyWindow(window);
